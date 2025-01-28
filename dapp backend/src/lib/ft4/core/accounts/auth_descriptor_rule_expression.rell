@@ -1,0 +1,93 @@
+enum rule_variable {
+	block_height,
+	block_time,
+	op_count
+}
+
+enum rule_operator {
+	lt,
+	le,
+	eq,
+	ge,
+	gt
+}
+
+struct rule_expression {
+	operator: rule_operator;
+	variable: rule_variable;
+	value: integer;
+}
+
+struct rule_parameters {
+	variable: rule_variable;
+	value: integer;
+}
+
+/*
+ * Operator functions
+ */
+
+function greater_than(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.gt,
+        rule_parameters.value
+    );
+}
+
+function greater_or_equal(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.ge,
+        rule_parameters.value
+    );
+}
+
+function equals(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.eq,
+        rule_parameters.value
+    );
+}
+
+function less_than(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.lt,
+        rule_parameters.value
+    );
+}
+
+function less_or_equal(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.le,
+        rule_parameters.value
+    );
+}
+
+/*
+ * Rule variable functions
+ */
+
+function block_height(integer): rule_parameters {
+    return rule_parameters(
+        rule_variable.block_height,
+        integer
+    );
+}
+
+function block_time(integer): rule_parameters {
+    return rule_parameters(
+        rule_variable.block_time,
+        integer
+    );
+}
+
+function op_count(integer): rule_parameters {
+    return rule_parameters(
+        rule_variable.op_count,
+        integer
+    );
+}

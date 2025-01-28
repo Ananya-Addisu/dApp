@@ -1,0 +1,56 @@
+// ferching all the tasks that are both completed and incompleted and sorting it using the due date
+
+query get_user_tasks(user_id: byte_array) {
+    // val account = auth.authenticate();
+    return task @* { .user.user_id == user_id } (
+        @sort_desc @omit task.due_date,
+        task_dto (
+            .task_id,
+            .task_title,
+            .task_description,
+            .due_date,
+            .is_completed,
+            .created_at,
+            .updated_at
+        )
+    );
+}
+
+//geting all the completed tasks by descending order and sorted by due date also
+
+query get_user_tasks_by_status(user_id: byte_array, is_completed: boolean) {
+    // val account = auth.authenticate();
+    return task @* {
+        .user.user_id == user_id,
+        .is_completed == is_completed
+    } (
+        @sort_desc task.due_date,
+        .task_id,
+        .task_title,
+        .task_description,
+        .is_completed,
+        .created_at,
+        .updated_at
+    );
+}
+
+
+query get_overdue_tasks(user_id: byte_array) {
+    // val account = auth.authenticate();
+    return task @* {
+        user @ { user_id },
+        .due_date > .to_date,
+        .is_completed == false
+    } (
+        @sort_desc @omit task.due_date,
+        task_dto (
+            .task_id,
+            .task_title,
+            .task_description,
+            .due_date,
+            .is_completed,
+            .created_at,
+            .updated_at
+        )
+    );
+}

@@ -1,0 +1,63 @@
+struct _auth_handler_client {
+    name: text;
+    flags: list<text>;
+    dynamic: boolean;
+}
+
+query get_auth_flags(op_name: name) = auth.get_auth_handler(op_name).flags;
+
+query get_auth_message_template(op_name: name, op_args: gtv?) = auth.get_auth_message_template(op_name, op_args);
+
+query get_login_config(name? = null) {
+    val configs = auth.login_config();
+    val config_name = name ?: auth.DEFAULT_LOGIN_CONFIG_NAME;
+
+    if (config_name == auth.DEFAULT_LOGIN_CONFIG_NAME) {
+        return if (config_name in configs)
+            configs[config_name]
+        else
+            auth._login_config(
+                flags = [],
+                rules = auth.ttl(1 * utils.MILLISECONDS_PER_DAY)
+            );
+    }
+    
+    return require(
+        configs.get_or_null(config_name), 
+        "Unknown login configuration <%s>".format(config_name)
+    );
+}
+
+query get_auth_handler_for_operation(op_name: name) {
+  val handler = auth.get_auth_handler(op_name);
+  return _auth_handler_client(
+    name=op_name,
+    flags=handler.flags,
+    dynamic=handler.resolver != null
+  );
+}
+
+query get_first_allowed_auth_descriptor_by_signers(
+  op_name: name,
+  args: gtv,
+  account_id: byte_array,
+  signers: list<byte_array>
+): byte_array? = auth.get_first_allowed_auth_descriptor_by_signers(op_name, args, account_id, signers);
+
+query get_first_allowed_auth_descriptor(
+  op_name: name,
+  args: gtv,
+  account_id: byte_array,
+  ad_ids: list<byte_array>
+): byte_array? = auth.get_first_allowed_auth_descriptor(op_name, args, account_id, ad_ids);
+
+query get_all_auth_handlers() {
+  val auth_handlers = auth.auth_handler();
+  return auth_handlers @* {}(
+    _auth_handler_client(
+      name=$[0],
+      flags=$[1].flags,
+      dynamic=$[1].resolver != null
+    )
+  );
+}

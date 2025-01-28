@@ -1,0 +1,3 @@
+operation register_account() {
+    strategies.register_account();
+}

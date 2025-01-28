@@ -1,0 +1,39 @@
+@extendable function before_init_transfer(
+    sender: accounts.account,
+    recipient_id: byte_array,
+    assets.asset,
+    amount: big_integer,
+    hops: list<byte_array>,
+    deadline: timestamp
+);
+
+@extendable function after_init_transfer(
+    sender: accounts.account,
+    recipient_id: byte_array,
+    assets.asset,
+    amount: big_integer,
+    hops: list<byte_array>,
+    deadline: timestamp,
+    pending_transfer
+);
+
+@extendable function before_apply_transfer(
+    sender_blockchain_rid: byte_array,
+    sender_account_id: byte_array,
+    recipient_id: byte_array,
+    assets.asset,
+    amount: big_integer,
+    hop_index: integer,
+    is_final: boolean
+);
+
+@extendable function after_apply_transfer(
+    sender_blockchain_rid: byte_array,
+    sender_account_id: byte_array,
+    recipient_id: byte_array,
+    assets.asset,
+    amount: big_integer,
+    hop_index: integer,
+    is_final: boolean,
+    applied_transfers
+);

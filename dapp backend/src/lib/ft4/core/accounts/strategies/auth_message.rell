@@ -1,0 +1,63 @@
+
+function get_register_account_message(
+    strategy_operation: gtx_operation,
+    register_account_operation: gtx_operation
+) {
+    val strategy = get_strategy(strategy_operation.name);
+
+    val account_details = strategy.account_details(strategy_operation.args.to_gtv());
+
+    var message = "Blockchain: %s\n\nPlease sign the message to register account\n\nAccount ID:\n%s\n\n"
+        .format(
+            chain_context.blockchain_rid,
+            account_details.account_id
+        );
+
+    message = message + auth_message_operation_details(register_account_operation);
+    message = message + auth_message_auth_descriptors_details(account_details.main, account_details.disposable);
+
+    return message;
+}
+
+function auth_message_operation_details(op: gtx_operation): text {
+    var message = "Operation:\n%s\n\n".format(op.name);
+    if (op.args.size() > 0) {
+        message = message + "Parameters:\n";
+        for (parameter in op.args) {
+            message = message + "- %s\n".format(parameter);
+        }
+        message = message + "\n\n";
+    }
+    return message;
+}
+
+function auth_message_auth_descriptors_details(
+    main: accounts.auth_descriptor, 
+    disposable: accounts.auth_descriptor? = null
+): text {
+    var message = "Main:\n" + auth_message_auth_descriptor(main);
+
+    if (disposable??) {
+        message = message + "\n\nDisposable:\n" + auth_message_auth_descriptor(disposable);
+    }
+
+    return message;
+}
+
+function auth_message_auth_descriptor(accounts.auth_descriptor)
+    = when (auth_descriptor.auth_type) {
+        S -> auth_message_single_sig(accounts.single_sig_args.from_gtv(auth_descriptor.args.to_gtv()));
+        M -> auth_message_multi_sig(accounts.multi_sig_args.from_gtv(auth_descriptor.args.to_gtv()));
+    };
+
+function auth_message_single_sig(args: accounts.single_sig_args)
+    = "Signer:\n%s\n\nFlags:\n%s\n".format(args.signer, args.flags);
+
+function auth_message_multi_sig(args: accounts.multi_sig_args) {
+    var message = "Signers:\n";
+    for (signer in args.signers) {
+        message = message + signer + "\n";
+    }
+    message = message + "\nRequired signatures: %d\n\n".format(args.signatures_required);
+    return message + "Flags:\n%s".format(args.flags);
+}

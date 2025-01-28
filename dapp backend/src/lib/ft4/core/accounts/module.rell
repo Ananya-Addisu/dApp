@@ -1,0 +1,358 @@
+@mount('ft4')
+module;
+
+import ^^.utils;
+import ^^.version;
+
+val GTV_NULL = null.to_gtv();
+val GTV_NULL_BYTES = null.to_gtv().to_bytes();
+
+struct rate_limit_config {
+    active: boolean = true;
+	max_points: integer = 10;
+    recovery_time: integer = 5000;
+    points_at_account_creation: integer = 1;
+}
+
+struct auth_descriptor_config {
+    max_rules: integer = 8;
+    max_number_per_account: integer = 10;
+}
+
+struct module_args {
+	rate_limit: rate_limit_config = rate_limit_config();
+    auth_descriptor: auth_descriptor_config = auth_descriptor_config();
+    auth_flags: auth_flags_config = auth_flags_config();
+}
+
+val AUTH_DESCRIPTORS_PER_ACCOUNT_UPPER_BOUND = min(
+    200,
+    chain_context.args.auth_descriptor.max_number_per_account
+);
+
+function get_auth_descriptor_config() = chain_context.args.auth_descriptor;
+
+/**
+ * Constant that represents account type for regular user accounts 
+ * created with `create_account_with_auth`.
+ */
+val ACCOUNT_TYPE_USER = "FT4_USER";
+
+enum auth_type {
+    S, M,
+}
+
+struct auth_descriptor {
+    auth_type;
+    args: list<gtv>;
+    rules: gtv;
+}
+
+entity account {
+    key id: byte_array;
+    index type: text;
+}
+
+entity main_auth_descriptor {
+    key account;
+    key auth_descriptor: account_auth_descriptor;
+}
+
+entity account_auth_descriptor {
+    id: byte_array;
+    key account, id;
+    index id;
+    auth_type;
+    args: byte_array;
+    rules: byte_array;
+    mutable ctr: integer;
+    created: timestamp;
+}
+
+entity auth_descriptor_signer {
+    key account_auth_descriptor, id: byte_array;
+}
+
+// rate limiter
+entity rl_state {
+    key account;
+    mutable points: integer;
+    mutable last_update: timestamp;
+    mutable recovery_time: timestamp;
+}
+
+
+function add_auth_descriptor(account, auth_descriptor): account_auth_descriptor {
+    require(
+        (account_auth_descriptor @ { account } (@sum 1))  <
+            AUTH_DESCRIPTORS_PER_ACCOUNT_UPPER_BOUND,
+        "Max <%d> auth descriptor count reached. Delete some before adding new ones."
+            .format(AUTH_DESCRIPTORS_PER_ACCOUNT_UPPER_BOUND)
+    );
+    
+    val id = auth_descriptor.hash();
+
+    validate_auth_descriptor_args(auth_descriptor);
+    validate_auth_descriptor_rules(auth_descriptor.rules);
+
+    val account_auth_descriptor = create account_auth_descriptor (
+        account, 
+        id,
+        auth_descriptor.auth_type,
+        args = auth_descriptor.args.to_gtv().to_bytes(),
+        rules = auth_descriptor.rules.to_gtv().to_bytes(),
+        created = utils.latest_time(),
+        ctr = 0
+    );
+
+    add_signers(account, auth_descriptor, account_auth_descriptor);
+    return account_auth_descriptor;
+}
+
+/**
+ * Deletes old main auth descriptor and sets provided auth descriptor as main auth descriptor
+ */
+function update_main_auth_descriptor(account, auth_descriptor) {
+    require(auth_descriptor.rules == GTV_NULL, "Main auth descriptor cannot be restricted");
+    require_mandatory_flags(auth_descriptor);
+    delete_main_auth_descriptor(account);
+    val account_auth_descriptor = add_auth_descriptor(account, auth_descriptor);
+    set_main_auth_descriptor(account, account_auth_descriptor);
+}
+
+function delete_main_auth_descriptor(account) {
+    val main_auth_descriptor = require(
+        main_auth_descriptor @? { account },
+        "Error deleting main auth descriptor of account <%s>. Auth descriptor not found".format(account.id)
+    );
+
+    val auth_descriptor = main_auth_descriptor.auth_descriptor;
+    delete main_auth_descriptor;
+    delete_auth_descriptor(auth_descriptor);
+}
+
+function set_main_auth_descriptor(account, account_auth_descriptor) {
+    require(
+        empty(main_auth_descriptor @? { account }),
+        "Error setting main auth descriptor. Main auth descriptor already exists"
+    );
+
+    create main_auth_descriptor(account, account_auth_descriptor);
+}
+
+function delete_auth_descriptor(auth_descriptor: account_auth_descriptor) {
+    require(
+        main_auth_descriptor @? { auth_descriptor } == null,
+        "Cannot delete main auth descriptor"
+    );
+    delete auth_descriptor_signer @* { auth_descriptor };
+    delete auth_descriptor;
+}
+
+function delete_all_auth_descriptors_except_main(account) {
+    val main = main_auth_descriptor @ { account } ( .auth_descriptor );
+    delete (ads: auth_descriptor_signer, ad: account_auth_descriptor) @* {
+        ad.account == account,
+        ad != main,
+        ads.account_auth_descriptor == ad
+    };
+
+    delete account_auth_descriptor @* {
+       .account == account,
+       $ != main
+    };
+}
+
+function create_account_with_auth(auth_descriptor, account_id: byte_array? = null): account {
+    require(auth_descriptor.rules == GTV_NULL, "Cannot create an account with a restricted auth descriptor");
+    require_mandatory_flags(auth_descriptor);
+
+    val id = account_id ?: get_account_id_from_signers(get_signers(auth_descriptor));
+    val account = create account(id, type = ACCOUNT_TYPE_USER);
+
+    val main = add_auth_descriptor(account, auth_descriptor);
+    create main_auth_descriptor(account, main);
+
+    create_rate_limiter_state_for_account(account);
+    
+    return account;
+}
+
+function require_mandatory_flags(auth_descriptor) {
+    var flags = get_flags(auth_descriptor);
+    val mandatory = get_auth_flags_config().mandatory;
+    require(
+        flags.contains_all(mandatory),
+        "Some of mandatory flags <%s> missing, found only <%s>".format(mandatory, flags)
+    );
+}
+
+/**
+ * Creates an account without auth descriptor. Used to create different "system" account types,
+ * that cannot be directly accessed, e.g. POOL, FEE, BLOCKCHAIN, ... accounts.
+ * 
+ * @param account_id    account id
+ * @param type          account type specified as a free form text. Usually uppercase.
+ */
+function create_account_without_auth(account_id: byte_array, type: text): account {
+    return create account(
+        id = account_id,
+        type = type
+    );
+}
+
+/**
+ * Finds or creates an account of specific type.
+ *
+ * @param account_id    account id
+ * @param type          account type 
+ */
+function ensure_account_without_auth(account_id: byte_array, type: text): account {
+    val account = account @? { .id == account_id };
+    if (account??) {
+        require(
+            account.type == type,
+            "Found account <%s> of invalid type. Expected <%s>, found <%s>".format(account.id, type, account.type)
+        );
+
+        return account;
+    } else {
+        return create_account_without_auth(account_id, type);
+    }
+}
+
+function get_flags(auth_descriptor) {
+    return when (auth_descriptor.auth_type) {
+        S -> single_sig_args.from_gtv(auth_descriptor.args.to_gtv()).flags;
+        M -> multi_sig_args.from_gtv(auth_descriptor.args.to_gtv()).flags;
+    };
+}
+
+/**
+* Checks if an `account_auth_descriptor` has all the specified flags
+*/
+function has_flags(account_auth_descriptor, required_flags: list<text>): boolean {
+    val flags = get_flags_from_args(account_auth_descriptor.auth_type, account_auth_descriptor.args);
+    return flags.contains_all(required_flags);
+}
+
+function add_signers(account, auth_descriptor, account_auth_descriptor) {
+    create auth_descriptor_signer(
+        get_signers(auth_descriptor) @* {}
+            (struct<auth_descriptor_signer>(account_auth_descriptor, id = $))
+    );
+}
+
+function get_account_id_from_signers(signers: list<byte_array>) {
+    require(signers.size() > 0, "Cannot derive account id. Signers list is empty");
+    return if (signers.size() == 1) signers[0].hash() else signers @* {} (@sort $).hash();
+}
+
+function auth_descriptor_by_id(account, id: byte_array) = require(
+    account_auth_descriptor @? { account, id },
+    "Auth descriptor '%s' not found for account '%s'".format(id, account.id)
+);
+
+function account_by_id(id: byte_array) = require(
+    account @? { id },
+    "Account not found: '%s'".format(id)
+);
+
+function single_sig_auth_descriptor(signer: byte_array, flags: set<text>) = auth_descriptor(
+    auth_type = auth_type.S,
+    args = list<gtv>.from_gtv(single_sig_args(
+        flags = flags,
+        signer = signer
+    ).to_gtv()),
+    GTV_NULL
+);
+
+function multi_sig_auth_descriptor(signers: list<byte_array>, signatures_required: integer, flags: set<text>) = auth_descriptor(
+    auth_type = auth_type.M,
+    args = list<gtv>.from_gtv(multi_sig_args(
+        signers = signers,
+        signatures_required = signatures_required,
+        flags = flags
+    ).to_gtv()),
+    GTV_NULL
+);
+
+function get_auth_descriptors(id: byte_array) {
+    return account_auth_descriptor @* {
+        .account.id == id
+    } (
+        get_auth_descriptor_data($.to_struct())
+    );
+}
+
+function get_auth_descriptors_by_signer(account_id: byte_array, signer: byte_array) {
+    return auth_descriptor_signer @* {
+        .account_auth_descriptor.account.id == account_id,
+        .id == signer
+    } (
+        get_auth_descriptor_data(.account_auth_descriptor.to_struct())
+    );
+}
+
+function get_auth_descriptor_data(ad: struct<account_auth_descriptor>) {
+    return (
+        id = ad.id,
+        account_id = ad.account.id,
+        auth_type = ad.auth_type,
+        args = gtv.from_bytes(ad.args),
+        rules = gtv.from_bytes(ad.rules),
+        created = ad.created
+    );
+}
+
+function get_paginated_accounts_by_signer(id: byte_array, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return auth_descriptor_signer @* {
+        id,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data=.account_auth_descriptor.account.to_struct().to_gtv_pretty(),
+            rowid=.rowid
+        )
+    ) limit utils.fetch_data_size(page_size); 
+}
+
+function get_paginated_accounts_by_ad_id(id: byte_array, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return account_auth_descriptor @* {
+        .id == id,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data=.account.id.to_gtv_pretty(),
+            rowid=.rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_paginated_accounts_by_type(type: text, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return account @* {
+        .type == type,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = .id.to_gtv(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);    
+}
+
+function validate_auth_descriptor_args(auth_descriptor) {
+    when (auth_descriptor.auth_type) {
+        S -> single_sig_args.from_gtv(auth_descriptor.args.to_gtv());
+        M -> {
+            val args = multi_sig_args.from_gtv(auth_descriptor.args.to_gtv());
+            require(args.signatures_required > 0, "Required signatures must be positive");
+            require(args.signatures_required <= args.signers.size(), "Required signatures cannot be greater than number of signers");
+        }
+    }
+}
+
+function get_max_allowed_auth_descriptor_rules() = chain_context.args.auth_descriptor.max_rules;

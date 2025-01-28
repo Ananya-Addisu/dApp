@@ -1,0 +1,94 @@
+
+struct single_sig_args {
+    flags: set<text>;
+    signer: byte_array;
+}
+
+struct multi_sig_args {
+    flags: set<text>;
+    signatures_required: integer;
+    signers: list<byte_array>;
+}
+
+/*
+ * Returns VALID if valid.
+ */
+function check_single_sig_auth(args: byte_array, signers: list<byte_array>, required_flags: list<text>): utils.validation_result {
+    if(signers.size() > 1) {
+        return utils.invalid("Single sig Auth Descriptor must have only one signer.");
+    }
+    if (signers.size() < 1) {
+        return utils.invalid("Single sig Auth Descriptor's signer list is empty.");
+    }
+
+    val ss_args = single_sig_args.from_bytes(args);
+    if ( check_required_flags(ss_args.flags, required_flags)) {
+        if (op_context.is_signer(signers[0])) {
+            return utils.VALID;
+        } else {
+            return utils.invalid("The auth descriptor signer did not sign the transaction.");
+        }
+    } else {
+        return utils.invalid("Some required flags " + required_flags.to_text() + " are missing on the (single sig) Auth Descriptor.");
+    }
+}
+
+/*
+ * Returns VALID if valid.
+ */
+function check_multi_sig_auth(args: byte_array, signers: list<byte_array>, required_flags: list<text>): utils.validation_result {
+    val multi_sign_args = multi_sig_args.from_bytes(args);
+    if (not (check_required_flags(multi_sign_args.flags, required_flags))) {
+       return utils.invalid("Some required flags " + required_flags.to_text() + " are missing on the (multi sig) Auth Descriptor.");
+    }
+    var num_sign = multi_sign_args.signatures_required;
+    for(s in signers) {
+        if(op_context.is_signer(s)) {
+            num_sign -= 1;
+            if(num_sign < 1) {
+                return utils.VALID;
+            }
+        }
+    }
+    return utils.invalid("Transaction must be signed by at least " + multi_sign_args.signatures_required + " signers in the Auth Descriptor.");
+}
+
+/*
+ * Returns false if any of the required flags are missing from the "flags" set.
+ */
+function check_required_flags(flags: set<text>, required_flags: list<text>): boolean {
+    return flags.contains_all(required_flags);
+}
+
+/*
+ * Returns the set of flags found in the "args" parameter.
+ */
+function get_flags_from_args(a_t: auth_type, args: byte_array): set<text> {
+    return when (a_t) {
+        S -> single_sig_args.from_bytes(args).flags;
+        M -> multi_sig_args.from_bytes(args).flags;
+    };
+}
+
+/*
+ * Returns VALID if authentication arguments are valid.
+ */
+function check_auth_args(a_t: auth_type, args: byte_array, signers: list<byte_array>, required_flags: list<text>): utils.validation_result {
+    return when (a_t) {
+        S -> check_single_sig_auth(args, signers, required_flags);
+        M -> check_multi_sig_auth(args, signers, required_flags);
+    };
+}
+
+function get_signers_from_encoded_auth_descriptor(a_t: auth_type, args: byte_array): list<byte_array> {
+    return when (a_t) {
+        S -> [single_sig_args.from_bytes(args).signer];
+        M -> multi_sig_args.from_bytes(args).signers;
+    };
+}
+
+function get_signers(auth_descriptor)
+    = when (auth_descriptor.auth_type) {
+        S -> [single_sig_args.from_gtv(auth_descriptor.args.to_gtv()).signer];
+        M -> multi_sig_args.from_gtv(auth_descriptor.args.to_gtv()).signers;
+    };

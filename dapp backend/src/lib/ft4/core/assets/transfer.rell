@@ -1,0 +1,63 @@
+@extendable
+function is_create_on_internal_transfer_enabled(): boolean = false;
+
+@extendable
+function create_on_internal_transfer(
+   sender: accounts.account,
+   recipient_id: byte_array,
+   asset,
+   amount: big_integer
+);
+
+@extendable
+function recall_on_internal_transfer(
+   sender: accounts.account,
+   transfer_tx_rid: byte_array,
+   transfer_op_index: integer
+);
+
+namespace Unsafe {
+
+   function transfer_to_recipient_id(sender: accounts.account, recipient_id: byte_array, asset, amount: big_integer) {
+      val recipient = accounts.account @? { .id == recipient_id };
+      if (recipient != null) {
+          transfer(sender, recipient, asset, amount);
+      } else {
+          require(is_create_on_internal_transfer_enabled(),
+              "Account <%s> does not exist and creating accounts on transfer is not enabled".format(recipient_id));
+          create_on_internal_transfer(sender, recipient_id, asset, amount);
+      }
+   }
+
+   function transfer(from: accounts.account, to: accounts.account, asset, amount: big_integer) {
+      require_zero_exclusive_asset_amount_limits(amount, "Parameter amount");
+      require(from != to, "Sender and receiver have to be different");
+
+      before_transfer(from, to, asset, amount);
+
+      deduct_balance(from, asset, amount);
+      create transfer_history_entry(
+         .account = from,
+         .asset = asset,
+         .delta = amount,
+         .op_index = op_context.op_index,
+         .is_input = true
+      );
+      
+      increase_balance(to, asset, amount);
+      create transfer_history_entry(
+         .account = to,
+         .asset = asset,
+         .delta = amount,
+         .op_index = op_context.op_index,
+         .is_input = false
+      );
+
+      after_transfer(from, to, asset, amount);
+   }
+
+   function recall_unclaimed_transfer(accounts.account, transfer_tx_rid: byte_array, transfer_op_index: integer) {
+      require(is_create_on_internal_transfer_enabled(), "Creating accounts on transfer is not enabled");
+      recall_on_internal_transfer(account, transfer_tx_rid, transfer_op_index);
+   }
+}

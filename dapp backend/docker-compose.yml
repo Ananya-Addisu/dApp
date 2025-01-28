@@ -1,0 +1,10 @@
+services:
+  db:
+    image: postgres
+    environment:
+      POSTGRES_DB: postchain
+      POSTGRES_USER: postchain
+      POSTGRES_PASSWORD: postchain
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF-8"
+    ports:
+      - "5432:5432"

@@ -1,0 +1,140 @@
+
+@log entity transfer_history_entry {
+    op_index: integer = op_context.op_index; // helps to locate exact position of transfer entry in transaction
+    index transaction, op_index;
+
+    index accounts.account;
+    index asset;
+    delta: big_integer;
+    is_input: boolean;
+}
+
+@log entity crosschain_transfer_history_entry {
+    op_index: integer = op_context.op_index; // helps to locate exact position of transfer entry in transaction
+    index transaction, op_index;
+
+    blockchain_rid: byte_array;
+    index account_id: byte_array;
+    index asset;
+    delta: big_integer;
+    is_input: boolean;
+}
+
+enum transfer_type {
+    sent,
+    received,
+}
+
+struct filter {
+    transfer_type?;
+}
+
+function extract_data_from_transfer_history_list(
+        entries: list<transfer_history_entry>
+    ): list<(data:gtv,rowid:rowid)> {
+    return entries @* {} (
+        data = extract_data_from_transfer_history_entry($).to_gtv_pretty(),
+        rowid = .rowid
+    );
+}
+
+function extract_operation_name(entry: transfer_history_entry): text {
+    val gtx = gtx_transaction.from_gtv(gtv.from_bytes(entry.transaction.tx_data));
+    return gtx.body.operations[entry.op_index].name;
+}
+
+function extract_data_from_transfer_history_entry(entry: transfer_history_entry) {
+    return (
+        id = entry.rowid,
+        delta = entry.delta,
+        decimals = entry.asset.decimals,
+        asset = map_asset(entry.asset),
+        is_input = entry.is_input,
+        timestamp = entry.transaction.block.timestamp,
+        block_height = entry.transaction.block.block_height,
+        tx_rid = entry.transaction.tx_rid,
+        tx_data = entry.transaction.tx_data,
+        operation_name = extract_operation_name(entry),
+        op_index = entry.op_index,
+        is_crosschain = exists(
+            crosschain_transfer_history_entry @* { .transaction == entry.transaction, .op_index == entry.op_index, .asset == entry.asset }
+        )
+    );
+}
+
+function get_paginated_transfers(accounts.account?, asset?, filter, height: integer?, page_size: integer?, page_cursor: text?) {
+    var before_rowid: rowid? = null;
+    if (page_cursor??) {
+        val cursor = utils.decode_cursor(page_cursor);
+        before_rowid = cursor.before_rowid;
+    }
+
+    val entries = transfer_history_entry @* {
+        if (account == null) true else .account == account,
+        if (asset == null) true else .asset == asset,
+        if (filter.transfer_type == null) true else .is_input == (filter.transfer_type!! == transfer_type.sent),
+        if (height == null) true else (.transaction.block.block_height > height),
+        if (before_rowid??) (.rowid < before_rowid) else true
+    } (@sort_desc $) limit utils.fetch_data_size(page_size);
+    
+    return extract_data_from_transfer_history_list(entries) @* {} (
+        utils.pagination_result(
+            data = .data,
+            rowid = .rowid
+        )
+    );
+}
+
+struct transfer_detail {
+    blockchain_rid: byte_array;
+    account_id: byte_array;
+    asset_id: byte_array;
+    delta: big_integer;
+    is_input: boolean;
+}
+
+function get_transfer_details(tx_rid: byte_array, op_index: integer): set<transfer_detail> {
+    val result = set(transfer_history_entry @*
+        { .transaction.tx_rid == tx_rid, op_index,
+            .account.type != crosschain.ACCOUNT_TYPE_BLOCKCHAIN }
+        (extract_details_from_transfer_history_entry($)));
+
+    result.add_all(crosschain_transfer_history_entry @*
+        { .transaction.tx_rid == tx_rid, op_index }
+        (extract_details_from_crosschain_transfer_history_entry($))
+    );
+
+    return result;
+}
+
+function get_transfer_details_by_asset(tx_rid: byte_array, op_index: integer, asset_id: byte_array): set<transfer_detail> {
+    val result = set(transfer_history_entry @*
+        { .transaction.tx_rid == tx_rid, op_index, .asset.id == asset_id,
+            .account.type != crosschain.ACCOUNT_TYPE_BLOCKCHAIN }
+        (extract_details_from_transfer_history_entry($)));
+
+    result.add_all(crosschain_transfer_history_entry @*
+        { .transaction.tx_rid == tx_rid, op_index, .asset.id == asset_id }
+        (extract_details_from_crosschain_transfer_history_entry($))
+    );
+
+    return result;
+}
+
+function extract_details_from_transfer_history_entry(entry: transfer_history_entry) =
+    transfer_detail(
+        blockchain_rid = chain_context.blockchain_rid,
+        account_id = entry.account.id,
+        asset_id = entry.asset.id,
+        delta = entry.delta,
+        is_input = entry.is_input
+    );
+
+function extract_details_from_crosschain_transfer_history_entry(entry: crosschain_transfer_history_entry) =
+    transfer_detail(
+        blockchain_rid = entry.blockchain_rid,
+        account_id = entry.account_id,
+        asset_id = entry.asset.id,
+        delta = entry.delta,
+        is_input = entry.is_input
+    );

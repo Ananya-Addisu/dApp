@@ -1,0 +1,5 @@
+@mount("ft4")
+module;
+
+import ^^^.core.assets;
+import ^^^.core.accounts;

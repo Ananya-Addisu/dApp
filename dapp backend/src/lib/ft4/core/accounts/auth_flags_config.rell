@@ -1,0 +1,47 @@
+
+struct auth_flags_config {
+    mandatory: gtv = ["A", "T"].to_gtv();
+    default: gtv? = null;
+}
+
+function get_raw_auth_flags_config() {
+    return chain_context.args.auth_flags;
+}
+
+function get_auth_flags_config() {
+    val flags = chain_context.args.auth_flags;
+    val mandatory = parse_auth_flags(flags.mandatory);
+    val default = if (flags.default??) parse_auth_flags(flags.default!!) else mandatory;
+
+    return (
+        mandatory = mandatory,
+        default = default
+    );
+}
+
+function parse_auth_flags(gtv) {
+    var flags = list<text>();
+    
+    if (utils.is_list(gtv)) {
+        flags = require(
+            try_call(list<text>.from_gtv(gtv, *)),
+            "Cannot parse auth flags. Expected flags list, but found <%s>".format(gtv)
+        );
+    } else if (utils.is_text(gtv)) {
+        flags = (text.from_gtv(gtv).split(",")) @* {} ($.trim());
+    } else {
+        require(false, "Expected flags list or comma separated flags list, but found <%s>".format(gtv));
+    }
+
+    require_valid_auth_flags(flags);
+
+    return flags;
+}
+
+function require_valid_auth_flags(flags: list<text>) {
+    val invalid_flags = flags @* { not $.matches("[a-z_A-Z]+") };
+    require(
+        empty(invalid_flags),
+        "Found invalid flags <%s>".format(invalid_flags)
+    );
+}

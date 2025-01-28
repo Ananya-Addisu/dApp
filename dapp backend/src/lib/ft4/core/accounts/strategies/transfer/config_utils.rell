@@ -1,0 +1,262 @@
+val _CONFIG_ERROR_TEXT = "Error in moduleArgs (lib.ft4.core.accounts.strategy.transfer): ";
+
+/*
+ * Used in transfer strategy rules config to specify current chain
+ */
+val CURRENT_CHAIN_REF = "$";
+
+/*
+ * Used in transfer strategy rules to specify current user for 
+ * the scenario when transfer rule requires that sender and recipient is the same.
+ */
+val CURRENT_USER_REF = "X";
+
+struct allowlist {
+    allow_all: boolean = false;
+    allowed_values: list<byte_array> = [];
+}
+
+struct asset_limit {
+    id: byte_array? = null;
+    issuing_blockchain_rid: byte_array? = null;
+    name: text? = null;
+    min_amount: big_integer;
+}
+
+struct rule {
+    timeout_days: integer = 0;
+    strategies: list<text> = [];
+
+    blockchains: allowlist = allowlist();
+    senders: allowlist = allowlist();
+    recipients: allowlist = allowlist();
+
+    require_same_address: boolean = false;
+
+    allow_all_assets: boolean = false;
+    asset_limits: list<asset_limit> = list<asset_limit>();
+}
+
+function get_config(config_gtv: gtv = chain_context.args.rules): list<rule> {
+    val config = list<rule>();
+
+    val inputs = list<module_args_list_element>.from_gtv_pretty(config_gtv);
+
+    for (input in inputs) {
+        val strats = if (utils.is_list(input.strategy))
+            list<text>.from_gtv(input.strategy)
+        else [text.from_gtv(input.strategy)];
+
+        val sender_res = parse_account_ids_from_gtv(
+            input.sender
+        );
+
+        val recipient_res = parse_account_ids_from_gtv(
+            input.recipient
+        );
+
+        require(
+            sender_res.require_same == recipient_res.require_same,
+            _CONFIG_ERROR_TEXT + "'X' should appear in both or none of recipient and sender."
+        );
+
+        var allow_all_assets: boolean;
+        var asset_limits: list<asset_limit>;
+        val res = parse_asset_limits_from_gtv(input.asset);
+        if (res == null) {
+            allow_all_assets = true;
+            asset_limits = list<asset_limit>();
+        } else {
+            allow_all_assets = false;
+            asset_limits = res;
+        }
+
+        require(input.timeout_days >= 0, "timeout_days cannot be negative");
+        config.add(
+            rule(
+                timeout_days = input.timeout_days,
+                strategies = strats,
+                blockchains =
+                    parse_blockchains_from_gtv(input.sender_blockchain),
+                senders = sender_res.allowlist,
+                recipients = recipient_res.allowlist,
+                require_same_address = sender_res.require_same,
+                allow_all_assets,
+                asset_limits
+            )
+        );
+    }
+    return config;
+}
+
+function parse_account_ids_from_gtv(gtv): (
+    allowlist: allowlist,
+    require_same: boolean
+) {
+    if (utils.is_list(gtv)) {
+        val allowed_values = list<byte_array>();
+        val gtv_list = list<gtv>.from_gtv(gtv);
+
+        for (element in gtv_list) {
+            val parsed_element = parse_account_id_single_value_from_gtv(element);
+            if (parsed_element.allow_all) {
+                require(
+                    gtv_list.size() == 1,
+                    _CONFIG_ERROR_TEXT + "using multiple values alongside '*' and 'X' is not allowed."
+                );
+                return (allowlist=allowlist(true), require_same=parsed_element.is_x);
+            } else allowed_values.add(parsed_element.allowed_value!!);
+        }
+        return (
+            allowlist = allowlist(allowed_values),
+            require_same = false
+        );
+    } else {
+        val parsed_gtv = parse_account_id_single_value_from_gtv(gtv);
+        return (
+            allowlist = allowlist(
+                parsed_gtv.allow_all,
+                if (parsed_gtv.allowed_value??) [parsed_gtv.allowed_value!!] else list<byte_array>()
+            ),
+            require_same = parsed_gtv.is_x
+        );
+    }
+}
+
+function parse_account_id_single_value_from_gtv(gtv): (
+    allow_all: boolean,
+    allowed_value: byte_array?,
+    is_x: boolean
+) {
+    var allow_all = false;
+    var allowed_value: byte_array? = null;
+    var is_x = false;
+
+    if (utils.is_text(gtv)) { // "*" or "abcdef"
+        val input = text.from_gtv(gtv);
+        if (input == "*") {
+            allow_all = true;
+        } else if (input == "X") {
+            is_x = true;
+            allow_all = true;
+        } else {
+            allowed_value = try_call(byte_array.from_hex(input, *));
+            require(
+                allowed_value,
+                _CONFIG_ERROR_TEXT +
+                "sender and recipient only allow blockchain RIDs, 'X' and '*'. Received <%s>."
+                    .format(input)
+            );
+        }
+    } else {
+        require(
+            utils.is_byte_array(gtv),
+            _CONFIG_ERROR_TEXT +
+            "sender and recipient fields only support strings, byte arrays and lists of these types. Received <%s>."
+                .format(gtv)
+        );
+        allowed_value = byte_array.from_gtv(gtv);
+    }
+
+    return (
+        allow_all = allow_all,
+        allowed_value = allowed_value,
+        is_x = is_x
+    );
+}
+
+function parse_blockchains_from_gtv(gtv): allowlist {
+    if (utils.is_list(gtv)) {
+        val allowed_values = list<byte_array>();
+        val gtv_list = list<gtv>.from_gtv(gtv);
+
+        for (element in gtv_list) {
+            val parsed_element = parse_blockchain_single_value_from_gtv(element);
+            if (parsed_element.allow_all) {
+                require(
+                    gtv_list.size() == 1,
+                    _CONFIG_ERROR_TEXT + "using multiple values alongside '*' is not allowed."
+                );
+                return allowlist(true);
+            } else allowed_values.add(parsed_element.allowed_value!!);
+        }
+        return allowlist(allowed_values);
+    } else {
+        val parsed_gtv = parse_blockchain_single_value_from_gtv(gtv);
+        return allowlist(
+            parsed_gtv.allow_all,
+            if (parsed_gtv.allowed_value??) [parsed_gtv.allowed_value!!] else list<byte_array>()
+        );
+    }
+}
+
+function parse_blockchain_single_value_from_gtv(gtv): (
+    allow_all: boolean,
+    allowed_value: byte_array?
+) {
+    var allow_all = false;
+    var allowed_value: byte_array? = null;
+
+    if (utils.is_text(gtv)) { // "*" or "$" or "abcdef"
+        val input = text.from_gtv(gtv);
+        if (input == "*") {
+            allow_all = true;
+        } else if (input == CURRENT_CHAIN_REF) {
+            allowed_value = chain_context.blockchain_rid;
+        } else {
+            allowed_value = try_call(byte_array.from_hex(input, *));
+            require(
+                allowed_value,
+                _CONFIG_ERROR_TEXT +
+                "sender_blockchain only allows blockchain RIDs, '$' and '*'. Received <%s>."
+                    .format(input)
+            );
+        }
+    } else {
+        require(
+            utils.is_byte_array(gtv),
+            _CONFIG_ERROR_TEXT + "sender_blockchain only supports strings, byte arrays and lists of these types. Received <%s>."
+                .format(gtv)
+        );
+        allowed_value = byte_array.from_gtv(gtv);
+    }
+
+    return (
+        allow_all = allow_all,
+        allowed_value = allowed_value
+    );
+}
+
+function parse_asset_limits_from_gtv(gtv): list<asset_limit>? {
+    if (utils.is_dict(gtv)) {
+        val input = map<name, gtv>.from_gtv_pretty(gtv);
+        return [parse_asset_limit(input)];
+    } else if (utils.is_list(gtv)) {
+        val inputs = list<map<name, gtv>>.from_gtv_pretty(gtv);
+        return inputs @* {} (parse_asset_limit($));
+    } else {
+        require(
+            gtv == "*".to_gtv(),
+            _CONFIG_ERROR_TEXT + "asset only accepts '*' and a list of ids and minimum amounts."
+        );
+        return null;
+    }
+}
+
+function parse_asset_limit(input: map<name, gtv>): asset_limit {
+    require("id" in input or "name" in input, _CONFIG_ERROR_TEXT + "asset limit needs to have either 'id' or 'name'");
+    require(not ("id" in input and "name" in input), _CONFIG_ERROR_TEXT + "asset limit cannot have both 'id' and 'name'");
+    return asset_limit(
+        id = if ("id" in input) byte_array.from_gtv(input["id"]) else null,
+        issuing_blockchain_rid = if ("name" in input)
+            (if ("issuing_blockchain_rid" in input) byte_array.from_gtv(input["issuing_blockchain_rid"]) else chain_context.blockchain_rid)
+            else null,
+        name = if ("name" in input) text.from_gtv(input["name"]) else null,
+        min_amount = parse_amount(input["min_amount"])
+    );
+}
+
+function parse_amount(input: gtv): big_integer = if (utils.is_text(input))
+    big_integer.from_text(text.from_gtv(input).replace("L", ""))
+else
+    big_integer.from_gtv(input);

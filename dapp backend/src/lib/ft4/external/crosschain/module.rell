@@ -1,0 +1,10 @@
+@mount('ft4.crosschain')
+module;
+
+import ^^.core.crosschain;
+
+import ^^.auth;
+import ^^.assets;
+import ^^.accounts;
+import ^^.utils;
+import ^^^.iccf;

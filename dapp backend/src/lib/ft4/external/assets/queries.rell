@@ -1,0 +1,91 @@
+
+query get_asset_balances(account_id: byte_array, page_size: integer?, page_cursor: text?) {
+    return utils.make_page(
+        assets.get_paginated_asset_balances(account_id, page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_asset_balance(account_id: byte_array, asset_id: byte_array) {
+    return assets.balance @? {
+        .account.id == account_id,
+        .asset.id == asset_id
+    } (
+        asset = assets.map_asset(.asset),
+        amount = .amount
+    );
+}
+
+query get_assets_by_name(name, page_size: integer?, page_cursor: text?) {
+    return utils.make_page(
+        assets.get_paginated_assets_by_name(name, page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_assets_by_symbol(symbol: text, page_size: integer?, page_cursor: text?) {
+    return utils.make_page(
+        assets.get_paginated_assets_by_symbol(symbol, page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_asset_by_id(asset_id: byte_array) {
+    return assets.asset @? { .id == asset_id } ( assets.map_asset($) );
+}
+
+query get_assets_by_type(type: text, page_size: integer?, page_cursor: text?) {
+    return utils.make_page(
+        assets.get_assets_by_type(type, page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_all_assets(page_size: integer?, page_cursor: text?) {
+    return utils.make_page(
+        assets.get_all_assets(page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_asset_details_for_crosschain_registration(asset_id: byte_array) {
+    return assets.get_asset_details_for_crosschain_registration(asset_id);
+}
+
+query get_transfer_history(account_id: byte_array, filter: assets.filter, page_size: integer?, page_cursor: text?) {
+    val account = accounts.account @? { account_id };
+    if (empty(account)) return null;
+
+    val paginated_transfers = assets.get_paginated_transfers(
+        account = account,
+        asset = null,
+        filter = filter,
+        height = null,
+        page_size = page_size,
+        page_cursor = page_cursor);
+    return utils.make_page(paginated_transfers, page_size);
+}
+
+query get_transfer_history_from_height(height: integer, asset_id: byte_array?, page_size: integer?, page_cursor: text?) {
+    val asset = if (asset_id != null) assets.Asset(asset_id) else null;
+
+    val paginated_transfers = assets.get_paginated_transfers(
+        account = null,
+        asset = asset,
+        filter = assets.filter(null),
+        height = height,
+        page_size = page_size,
+        page_cursor = page_cursor);
+    return utils.make_page(paginated_transfers, page_size);
+}
+
+query get_transfer_history_entry(rowid) {
+    val entry = assets.transfer_history_entry @? { .rowid == rowid };
+    return if (empty(entry)) null else assets.extract_data_from_transfer_history_entry(entry);
+}
+
+query get_transfer_details(tx_rid: byte_array, op_index: integer): set<assets.transfer_detail> =
+    assets.get_transfer_details(tx_rid, op_index);
+
+query get_transfer_details_by_asset(tx_rid: byte_array, op_index: integer, asset_id: byte_array): set<assets.transfer_detail> =
+    assets.get_transfer_details_by_asset(tx_rid, op_index, asset_id);

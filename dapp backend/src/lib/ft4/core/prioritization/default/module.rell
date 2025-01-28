@@ -1,0 +1,48 @@
+module;
+
+import ^^.auth;
+import ^^.accounts;
+import ^^.prioritization.*;
+
+@extend(priority_check) function(tx_body: gtx_transaction_body, tx_size: integer, tx_enter_timestamp: timestamp, current_timestamp: timestamp): priority_state_v1 {
+    val auth_ops = tx_body.operations @* { .name in [auth.EVM_AUTH_OP, auth.FT_AUTH_OP] };
+
+    val tx_accounts = list<accounts.account>();
+    for (auth_op in auth_ops) {
+        val (account_id, auth_descriptor_id) = auth.extract_account_and_auth_descriptor(auth_op.args);
+
+        val account = accounts.account @? { .id == account_id };
+        if (account == null) {
+            log("Account not found: %s".format(account_id));
+            return no_op_priority_state();
+        }
+
+        val auth_descriptor = auth.try_fetch_auth_descriptor(account, auth_descriptor_id);
+        if (auth_descriptor == null) {
+            log("Auth descriptor '%s' not found for account '%s'".format(auth_descriptor_id, account_id));
+            return no_op_priority_state();
+        } else {
+            tx_accounts.add(account);
+        }
+    }
+
+    if (tx_accounts.empty()) return no_account_priority_state(0.0);
+    val account = tx_accounts[0]; // Use first account if there are multiple
+
+    val rl_config = accounts.get_rate_limit_config_for_account(account);
+    if (rl_config.active == false) return no_account_priority_state(1.0);
+
+    val rl_state = accounts.rl_state @? { account };
+    if (rl_state == null) return no_account_priority_state(1.0);
+
+    val current_points = accounts.current_rate_limit_points(rl_config, rl_state, current_timestamp);
+
+    val priority = current_points.to_decimal() / rl_config.max_points;
+
+    return priority_state_v1(
+        account_id = account.id,
+        account_points = current_points,
+        tx_cost_points = tx_accounts.size(),
+        priority = priority
+    );
+}

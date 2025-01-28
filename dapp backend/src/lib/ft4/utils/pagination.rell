@@ -1,0 +1,63 @@
+import ^.{ get_module_args };
+
+struct page_cursor {
+    before_rowid: rowid? = null;
+}
+
+struct pagination_result {
+    data: gtv;
+    rowid: rowid;
+}
+
+function encode_cursor(page_cursor) = page_cursor.to_bytes().to_base64();
+
+function decode_cursor(cursor: text) = page_cursor.from_bytes(byte_array.from_base64(cursor));
+
+struct paged_result {
+    next_cursor: text?;
+    data: list<gtv>;
+}
+
+function null_page() = paged_result(
+    next_cursor = null,
+    data = list<gtv>()
+);
+
+function fetch_data_size(page_size: integer? = get_module_args().query_max_page_size) = 
+    min(get_module_args().query_max_page_size, page_size ?: get_module_args().query_max_page_size) + 1;
+
+function before_rowid(page_cursor: text?) {
+    var before_rowid: rowid? = null;
+    if (page_cursor??) {
+        val cursor = decode_cursor(page_cursor);
+        before_rowid = cursor.before_rowid;
+    }
+    return before_rowid;
+}
+
+
+function make_page(pagination_results: list<pagination_result>, page_size: integer?): paged_result {
+    if (page_size != null) {
+        require(page_size > 0, "Must return at least one item");
+    }
+    if (empty(pagination_results)) {
+         return null_page();
+    }
+    // adding +1 should help with next page null situation when current page size
+    // is equal to max page size
+    if(pagination_results.size() < fetch_data_size(page_size)) {
+        return paged_result(
+            next_cursor = null,
+            data = pagination_results  @* {} .data
+        );
+    }
+    val paginated_result = pagination_results.sub(0, pagination_results.size()-1);
+    val next_id = pagination_results[pagination_results.size()-2].rowid;
+    val next_cursor = page_cursor(
+        next_id
+    );
+    return paged_result(
+        next_cursor = encode_cursor(next_cursor),
+        data = paginated_result  @* {} .data
+    );
+}

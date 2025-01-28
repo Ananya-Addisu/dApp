@@ -1,0 +1,110 @@
+@mount("ft4")
+module;
+
+import ^^^^^.core.auth;
+import ^^^^^.core.assets;
+import ^^^^^.core.accounts;
+import ^^^^^.core.accounts.strategies;
+import ^^^^^.utils;
+import transfer: ^;
+
+entity subscription {
+    key accounts.account;
+    assets.asset;
+    mutable period_millis: integer;
+    mutable last_payment: timestamp;
+}
+
+operation ras_transfer_subscription(
+   asset_id: byte_array,
+   main: accounts.auth_descriptor,
+   disposable: accounts.auth_descriptor? = null
+) {
+    strategies.require_register_account_next_operation();
+}
+
+function account_details(gtv) {
+    val params = struct<ras_transfer_subscription>.from_gtv(gtv);
+    val signers = accounts.get_signers(params.main);
+    return strategies.account_details(
+        account_id = accounts.get_account_id_from_signers(signers),
+        main = params.main,
+        disposable = params.disposable
+    );
+}
+
+function transfer_action(accounts.account, strategy_params_gtv: gtv) {
+	transfer.do_transfer(account, "subscription");
+
+	val strategy_params = struct<ras_transfer_subscription>.from_gtv(strategy_params_gtv);
+    val subscription_assets = transfer.resolve_fee_assets(subscription_assets());
+	val subscription_amount = require(subscription_assets.get_or_null(strategy_params.asset_id),
+        "Asset <%s> is not allowed to pay subscription with".format(strategy_params.asset_id));
+    val asset = assets.Asset(strategy_params.asset_id);
+	assets.Unsafe.transfer(
+		account,
+		transfer.ensure_fee_account(subscription_account_id(), chain_context.blockchain_rid),
+		asset,
+		subscription_amount);
+
+    create subscription(
+        account,
+        asset,
+        period_millis = subscription_period_days() * utils.MILLISECONDS_PER_DAY,
+        last_payment = utils.latest_time()
+    );
+}
+
+@extend(strategies.strategy)
+function () = strategies.add_strategy(
+    op = rell.meta(ras_transfer_subscription),
+    account_details = account_details(*),
+    action = transfer_action(*)
+);
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(renew_subscription).mount_name,
+    flags = ["T"],
+    message = renew_subscription_message(*)
+);
+
+operation renew_subscription(asset_id: byte_array?) {
+    val account = auth.authenticate();
+
+    val subscription = require(subscription @? { account },
+        "No subscription for account <%s>".format(account.id));
+
+    val subscription_assets = transfer.resolve_fee_assets(subscription_assets());
+    val subscription_asset = if (asset_id != null) assets.Asset(asset_id) else subscription.asset;
+    val subscription_amount = require(subscription_assets.get_or_null(subscription_asset.id),
+        "Asset <%s> is not allowed to pay subscription with".format(subscription_asset.id));
+
+    assets.Unsafe.transfer(
+   		account,
+   		transfer.ensure_fee_account(subscription_account_id(), chain_context.blockchain_rid),
+   		subscription_asset,
+   		subscription_amount);
+
+    val remaining_period = max(0, subscription.last_payment + subscription.period_millis - utils.latest_time());
+    subscription.period_millis = subscription_period_days() * utils.MILLISECONDS_PER_DAY + remaining_period;
+
+    subscription.last_payment = utils.latest_time();
+}
+
+function renew_subscription_message(gtv) {
+    return "Please sign the message\nto renew subscription for account: {account_id}";
+}
+
+@extend(auth.before_authenticate) function(accounts.account, accounts.account_auth_descriptor) {
+    val subscription = subscription @? { account };
+    if (subscription != null) {
+        val op = op_context.get_current_operation();
+        val free_operations = free_operations();
+        free_operations.add(rell.meta(renew_subscription).mount_name);
+        if (op.name not in free_operations) {
+            require(utils.latest_time() <= (subscription.last_payment + subscription.period_millis),
+                "Subscription has expired");
+        }
+    }
+}

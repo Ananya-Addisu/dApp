@@ -1,0 +1,3 @@
+
+query get_fee_assets(): list<(asset_id: byte_array, amount: big_integer)> =
+        transfer.resolve_fee_assets(fee_assets()) @* {} ((asset_id = $[0], amount = $[1]));

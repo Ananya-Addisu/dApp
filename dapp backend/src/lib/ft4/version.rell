@@ -1,0 +1,4 @@
+@mount('ft4')
+module;
+
+query get_version(): text = "1.0.0";

@@ -1,0 +1,7 @@
+struct module_args {
+    query_max_page_size: integer = 100;
+}
+
+function get_module_args() {
+    return chain_context.args;
+}

@@ -1,0 +1,134 @@
+@test module;
+
+import main.*;
+import ^.test_operations.{ create_user };
+import lib.ft4.test.utils.{ ft_auth_operation_for };
+
+
+val alice = rell.test.pubkeys.alice;
+val task_id3 = rell.test.pubkeys.bob;
+val task_id = rell.test.pubkeys.charlie;
+val alice_kp = rell.test.keypairs.alice;
+val bob = rell.test.keypairs.bob;
+val task_id2 = rell.test.pubkeys.alice;
+
+function test_create_entities() {
+    // Test the creation of user alice
+
+    rell.test.tx()
+        .op(create_user("Alice", alice))
+        .run();
+
+
+    // Check if alice is in my account
+
+    assert_equals(user @ { } ( @sum 1 ), 1);
+
+
+    // task creation by the users alice
+
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))// Auth operation
+        .op(create_task(alice, task_id, "task-title", "this is the task description", 1746316800))
+        .sign(alice_kp)
+        .run();
+
+
+    // Check if the task is created
+
+    assert_equals(task @ { } ( @sum 1 ), 1);
+
+
+    // testing operation to updating the task
+
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))// Auth operation
+        .op(update_task(task_id, "updated-task", "this task is going to be updated", 1746316800))// Argument removed
+        .sign(alice_kp)
+        .run();
+
+    assert_equals(task @ { task_id } ( .task_title ), "updated-task");
+
+
+
+     // testing the completed tasks
+
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))// Auth operation
+        .op(complete_task(task_id))// Argument removed
+        .sign(alice_kp)
+        .run();
+    assert_equals(task @ { task_id } ( .is_completed ), true);
+
+    // deleting a task 
+
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))// Auth operation
+        .op(delete_task(task_id))// Argument removed
+        .sign(alice_kp)
+        .run();
+    assert_equals(task @ { } ( @sum 1 ), 0);
+
+}
+
+
+function test_get_user_tasks_by_status() {
+    // Create user alice
+    rell.test.tx()
+        .op(create_user("Alice", alice))
+        .run();
+
+    
+    // Create multiple tasks with different completion status
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))
+        .op(create_task(alice, task_id, "task-1", "completed task", 1746316800))
+        .sign(alice_kp)
+        .run();
+
+        rell.test.tx()
+        .op(ft_auth_operation_for(alice))
+        .op(create_task(alice, task_id2, "task-2", "incomplete task", 1746316800))
+        .sign(alice_kp)
+        .run();
+
+         rell.test.tx()
+         .op(ft_auth_operation_for(alice))
+         .op(complete_task(task_id))
+         .sign(alice_kp)
+         .run();
+
+         val incomplete_tasks = get_user_tasks_by_status(alice, false);
+            assert_equals(incomplete_tasks.size(), 1);
+            assert_equals(incomplete_tasks[0].task_title, "task-2");  
+}      
+
+
+
+function test_get_overdue_tasks() {
+    // Create user alice if not exists
+    rell.test.tx()
+        .op(create_user("Alice", alice))
+        .run();
+    
+    // Create tasks with different due dates
+    val past_date = 1641859200; // January 11, 2022
+    val future_date = 1988841600; // January 11, 2033
+    
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))
+        .op(create_task(alice, task_id, "overdue-task", "this task is overdue", past_date))
+        .sign(alice_kp)
+        .run();
+        
+    rell.test.tx()
+        .op(ft_auth_operation_for(alice))
+        .op(create_task(alice, task_id2, "future-task", "this task is in future", future_date))
+        .sign(alice_kp)
+        .run();
+    
+    
+    val overdue_tasks = get_overdue_tasks(alice);
+    assert_equals(overdue_tasks.size(), 0);
+
+}

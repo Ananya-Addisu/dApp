@@ -1,0 +1,7 @@
+@mount("ft4")
+module;
+
+import ^^^.core.assets.locking;
+import ^^^.assets;
+import ^^^.accounts;
+import ^^^.utils;

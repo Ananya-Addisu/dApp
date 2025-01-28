@@ -1,0 +1,10 @@
+
+function AuthDescriptor(id: byte_array) = require(
+    account_auth_descriptor @? { id },
+    "Provided auth descriptor id does not exist %s".format(id)
+);
+
+function Account(id: byte_array) = require(
+    account @? { id },
+    "Account not found: %s".format(id)
+);

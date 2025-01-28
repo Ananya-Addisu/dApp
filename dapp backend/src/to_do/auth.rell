@@ -1,0 +1,4 @@
+@extend(auth.auth_handler)
+function () = auth.add_auth_handler(
+    flags = ["MySession"]
+);

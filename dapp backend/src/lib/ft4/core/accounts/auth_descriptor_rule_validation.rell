@@ -1,0 +1,277 @@
+function serialize_rules(rules: list<rule_expression>): gtv {
+	if (rules.size() == 0) {
+		return GTV_NULL;
+	}
+	if (rules.size() == 1) {
+		return rule_expression_to_gtv(rules[0]);
+	}
+
+	val rules_gtv = ["and".to_gtv()];
+	for (rule in rules) {
+		rules_gtv.add(rule_expression_to_gtv(rule));
+	}
+	return rules_gtv.to_gtv();
+}
+
+function rule_expression_to_gtv(rule_expression): gtv = [
+        rule_expression.operator.name.to_gtv(),
+        rule_expression.variable.name.to_gtv(),
+        rule_expression.value.to_gtv()
+    ].to_gtv();
+
+function rule_expression_from_gtv(gtv) {
+	val components = list<gtv>.from_gtv(gtv);
+	val operator_name = text.from_gtv(components[0]);
+	val variable_name = text.from_gtv(components[1]);
+	val value = integer.from_gtv(components[2]);
+
+	val operator = require(
+			rule_operator.values() @? { .name == operator_name },
+			"Unknown rule operator %s".format(operator_name)
+	);
+
+	val variable = require(
+			rule_variable.values() @? { .name == variable_name },
+			"Unknown rule variable %s".format(variable_name)
+	);
+
+	return rule_expression(
+			operator,
+			variable,
+			value
+	);
+}
+
+function map_rule_expressions_from_gtv(gtv_rules: list<gtv>) {
+	val rules = list<rule_expression>();
+	for (rule in gtv_rules) {
+		rules.add(rule_expression_from_gtv(rule));
+	}
+	return rules;
+}
+
+function have_violating_rules(auth_descriptor: account_auth_descriptor) =
+	are_rules_violating(gtv.from_bytes(auth_descriptor.rules), load_variables(auth_descriptor.ctr));
+
+function load_variables(op_count: integer): map<text, gtv> {
+	val variables = map<text, gtv>();
+	variables[rule_variable.op_count.name] = (op_count + 1).to_gtv();
+	variables[rule_variable.block_height.name] = op_context.block_height.to_gtv();
+	variables[rule_variable.block_time.name] = op_context.last_block_time.to_gtv();
+	return variables;
+}
+
+function are_rules_violating(rules: gtv, variables: map<text, gtv>): boolean {
+	if (rules == GTV_NULL) {
+		return false;
+	}
+
+	val rules_gtv = list<gtv>.from_gtv(rules);
+
+	if (rules_gtv[0] != "and".to_gtv()) {
+		require(
+			rules_gtv.size() == 3,
+			"Expected a single rule expression, but got something else"
+		); // This error will be caught on the next line as well, but like this we can give a better error message
+
+		return is_rule_violated(rule_expression_from_gtv(rules_gtv.to_gtv()), variables);
+	}
+
+	return are_and_rules_violated(map_rule_expressions_from_gtv(rules_gtv.sub(1)), variables);
+}
+
+function is_rule_violated(rule: rule_expression, variables: map<text, gtv>): boolean {
+	return not evaluate_int_variable_rule(rule, variables);
+}
+
+function are_and_rules_violated(rules: list<rule_expression>, variables: map<text, gtv>): boolean {
+	for (rule in rules) {
+		if (is_rule_violated(rule, variables)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function is_active(account_auth_descriptor) = are_rules_active(gtv.from_bytes(account_auth_descriptor.rules));
+
+function are_rules_active(rules: gtv): boolean {
+	if (rules == GTV_NULL) {
+		return true;
+	}
+
+	val gtv_rules = list<gtv>.from_gtv(rules);
+	if (gtv_rules[0] == "and".to_gtv()) {
+		for (rule in gtv_rules.sub(1)) {
+			if (not is_rule_active(rule_expression_from_gtv(rule))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	return is_rule_active(rule_expression_from_gtv(gtv_rules.to_gtv()));
+}
+
+function is_rule_active(rule: rule_expression): boolean {
+	return when (rule.variable) {
+		block_height -> is_block_height_rule_active(rule);
+		block_time -> is_block_time_rule_active(rule);
+		op_count -> true;
+	};
+}
+
+/*
+ *  Variables
+ */
+
+function evaluate_int_variable_rule(
+	rule: rule_expression,
+	variables: map<text, gtv>
+): boolean {
+	val current_value = variable_value(
+		rule.variable,
+		variables
+	);
+	val defined_value = rule.value;
+
+	when (rule.operator) {
+		rule_operator.lt -> {
+			return current_value < defined_value;
+		}
+		rule_operator.le -> {
+			return current_value <= defined_value;
+		}
+		rule_operator.eq -> {
+			return current_value == defined_value;
+		}
+		rule_operator.ge -> {
+			return current_value >= defined_value;
+		}
+		rule_operator.gt -> {
+			return current_value > defined_value;
+		}
+	}
+}
+ 
+function variable_value(
+	variable: rule_variable,
+	variables: map<text, gtv>
+): integer {
+	when (variable) {
+		rule_variable.block_height -> {
+			return integer.from_gtv(variables[rule_variable.block_height.name]);
+		}
+		rule_variable.block_time -> {
+			return integer.from_gtv(variables[rule_variable.block_time.name]);
+		}
+		rule_variable.op_count -> {
+			return integer.from_gtv(variables[rule_variable.op_count.name]);
+		}
+	}
+}
+
+/*
+ * Analyze the rules before assigning them to an authenticator descriptor
+ */
+function validate_auth_descriptor_rules(rules: gtv) {
+ 	if (rules == GTV_NULL) {
+		return;
+	}
+
+	val rules_gtv = list<gtv>.from_gtv(rules);
+	if (rules_gtv[0] != "and".to_gtv()) {
+		validate_rule(rule_expression_from_gtv(rules_gtv.to_gtv()));
+	} else {
+		// +1 keeps track of the "and"
+		require(rules_gtv.size() <= chain_context.args.auth_descriptor.max_rules + 1, "Too many rules");
+
+		for (gtv_rule in rules_gtv.sub(1)) {
+			validate_rule(rule_expression_from_gtv(gtv_rule));
+		}
+	}
+
+	require((not are_rules_active(rules)) or (not are_rules_violating(rules, load_variables(op_count = 0))),
+		"Active and invalid rules detected");
+}
+
+function validate_rule(rule: rule_expression) {
+	when (rule.variable) {
+		rule_variable.block_height -> {
+			require(rule.value >= 0, "rule variable block_height must be a non-negative value");
+		}
+		rule_variable.block_time -> {
+			require(rule.value >= 0, "rule variable block_time must be a non-negative value");
+		}
+		rule_variable.op_count -> {
+			when (rule.operator) {
+				rule_operator.lt -> require(rule.value > 1, "rule variable op_count must be a positive value greater than 1");
+				rule_operator.le -> require(rule.value > 0, "rule variable op_count must be a positive value");
+				else -> require(false, "rule variable op_count must be lt or le");
+			}
+		}
+	}
+}
+
+function update_auth_descriptor_rule_variables(desc: account_auth_descriptor) {
+	desc.ctr += 1;
+	return desc;
+}
+
+/*
+ * auth descriptor cleanup
+ */
+
+function delete_expired_auth_descriptors(account) {
+	val auth_descriptors = account_auth_descriptor @* { account };
+
+	val deleted_descriptors = set<account_auth_descriptor>();
+
+	for (auth_descriptor in auth_descriptors) {
+		if (is_active(auth_descriptor) and have_violating_rules(auth_descriptor)) {
+			delete_auth_descriptor(auth_descriptor);
+			deleted_descriptors.add(auth_descriptor);
+		}
+	}
+
+	return deleted_descriptors;
+}
+
+/****************************************************************************************
+ *                                     block_time                                       *
+ ****************************************************************************************/
+
+function is_block_time_rule_active(r: rule_expression): boolean {
+	when (r.operator) {
+		rule_operator.gt -> {
+			return op_context.last_block_time > r.value;
+		}
+		rule_operator.ge,
+		rule_operator.eq -> {
+			return op_context.last_block_time >= r.value;
+		}
+		else -> {
+			return true;
+		}
+	}
+}
+
+
+/****************************************************************************************
+ *                                  block_height                                        *
+ ****************************************************************************************/
+
+function is_block_height_rule_active(r: rule_expression): boolean {
+	when (r.operator) {
+		rule_operator.gt -> {
+			return op_context.block_height > r.value;
+		}
+		rule_operator.ge,
+		rule_operator.eq -> {
+			return op_context.block_height >= r.value;
+		}
+		else -> {
+			return true;
+		}
+	}
+}

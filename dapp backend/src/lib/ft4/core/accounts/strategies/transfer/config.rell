@@ -1,0 +1,103 @@
+function is_value_allowed(value: byte_array, allowlist) {
+    return 
+        allowlist.allow_all
+        or
+        value in allowlist.allowed_values;
+}
+
+function is_blockchain_allowed(rule, blockchain_rid: byte_array) {
+    val bc = rule.blockchains;
+    return is_value_allowed(blockchain_rid, bc);
+}
+
+function is_sender_allowed(rule, sender_id: byte_array) {
+    val sender = rule.senders;
+    return is_value_allowed(sender_id, sender);
+}
+
+function is_recipient_allowed(rule, recipient_id: byte_array, sender_id: byte_array) {
+    if (rule.require_same_address) {
+        return recipient_id == sender_id;
+    }
+    return is_value_allowed(recipient_id, rule.recipients);
+}
+
+function is_asset_amount_allowed(rule, asset: assets.asset, amount: big_integer) {
+    if (rule.allow_all_assets) return true;
+    var min_amount = 0L;
+    for (asset_limit in rule.asset_limits) {
+        if ((asset_limit.id != null and asset_limit.id!! == asset.id) or
+            (asset_limit.name != null and asset_limit.name!! == asset.name and
+                asset_limit.issuing_blockchain_rid != null and asset_limit.issuing_blockchain_rid!! == asset.issuing_blockchain_rid)) {
+            min_amount = asset_limit.min_amount;
+        }
+    }
+    if (min_amount > 0L) {
+        return amount >= min_amount;
+    } else {
+        return false;
+    }
+}
+
+function has_tx_expired(rule, tx_start_timestamp: timestamp) {
+    val timeout_millis = rule.timeout_days * utils.MILLISECONDS_PER_DAY;
+    return tx_start_timestamp + timeout_millis < utils.latest_time();
+}
+
+function is_strategy_active(rule, strategy: text) {
+    val strats = rule.strategies;
+    return strategy in strats;
+}
+
+function find_allowed_rules(
+    from_chain: byte_array,
+    from_id: byte_array,
+    to_id: byte_array,
+    asset: assets.asset,
+    amount: big_integer
+): map<text,rule> {
+    val cfg = get_config();
+    val allowed_rules = cfg @* {
+        is_blockchain_allowed($, from_chain),
+        is_sender_allowed($, from_id),
+        is_recipient_allowed($, to_id, from_id),
+        is_asset_amount_allowed($, asset, amount)
+    };
+
+    val rule_map = map<text,rule>();
+    for (rule in allowed_rules) {
+        for (strat in rule.strategies) {
+            rule_map[strat] = rule;
+        }
+    }
+    return rule_map;
+}
+
+function find_allowed_assets(sender_blockchain_rid: byte_array, sender_id: byte_array, recipient_id: byte_array):
+        map<byte_array, big_integer>? {
+    val cfg = get_config();
+    val allowed_rules = cfg @* {
+        is_blockchain_allowed($, sender_blockchain_rid),
+        is_sender_allowed($, sender_id),
+        is_recipient_allowed($, recipient_id, sender_id)
+    };
+
+    val allowed_assets = map<byte_array, big_integer>();
+    for (rule in allowed_rules) {
+        val resolved_assets = resolve_allowed_assets(rule);
+        if (resolved_assets == null) return null;
+        allowed_assets.put_all(resolved_assets);
+    }
+    return allowed_assets;
+}
+
+function resolve_allowed_assets(rule): map<byte_array, big_integer>? {
+    val allowed_assets = map<byte_array, big_integer>();
+    if (rule.allow_all_assets) return null;
+    for (asset_limit in rule.asset_limits) {
+        val asset_id = asset_limit.id ?:
+            assets.asset @? { .name == asset_limit.name!!, .issuing_blockchain_rid == asset_limit.issuing_blockchain_rid!! } (.id);
+        if (asset_id != null) allowed_assets[asset_id] = asset_limit.min_amount;
+    }
+    return allowed_assets;
+}

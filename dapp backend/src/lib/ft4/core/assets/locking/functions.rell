@@ -1,0 +1,164 @@
+
+val ACCOUNT_TYPE_LOCK = "FT4_LOCK";
+
+function ensure_lock_account(type: text, accounts.account): accounts.account {
+    val link = linking.account_link @? { 
+        .account == account,
+        .secondary.type == ACCOUNT_TYPE_LOCK,
+        .type == type 
+    };
+
+    if (link??) return link.secondary;
+
+    val secondary = accounts.create_account_without_auth(
+        get_lock_account_id(account, type), 
+        ACCOUNT_TYPE_LOCK
+    );
+    
+    create linking.account_link(
+        account = account,
+        secondary = secondary,
+        type = type
+    );
+
+    return secondary;
+}
+
+function get_lock_accounts(accounts.account) {
+    return linking.account_link @* { 
+        .account == account, 
+        .secondary.type == ACCOUNT_TYPE_LOCK 
+    } (
+        type = .type,
+        account = .secondary
+    );
+}
+
+function get_lock_accounts_with_non_zero_balances(accounts.account) {
+    return linking.account_link @* {
+        .account == account,
+        .secondary.type == ACCOUNT_TYPE_LOCK,
+        exists(assets.balance @* { .account == account_link.secondary })
+    } (
+        type = .type,
+        account = .secondary
+    );
+}
+
+function get_lock_account_id(accounts.account, type: text) {
+    return (account.id, ACCOUNT_TYPE_LOCK, type).hash();
+}
+
+function lock_asset(type: text, accounts.account, assets.asset, amount: big_integer) {
+    val lock_account = ensure_lock_account(type, account);
+
+    assets.Unsafe.transfer(account, lock_account, asset, amount);
+}
+
+function unlock_asset(type: text, accounts.account, assets.asset, amount: big_integer) {
+    val lock_account = ensure_lock_account(type, account);
+
+    assets.Unsafe.transfer(lock_account, account, asset, amount);
+}
+
+function get_locked_asset_balance(
+    accounts.account, 
+    assets.asset, 
+    types: list<text>? = null, 
+    page_size: integer? = null, 
+    page_cursor: text? = null
+) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return (al: linking.account_link, b: assets.balance) @* {
+        al.account == account,
+        al.secondary.type == ACCOUNT_TYPE_LOCK,
+        if (types??) al.type in types else true,
+        b.account == al.secondary,
+        b.asset == asset,
+        b.rowid > (before_rowid ?: rowid(0))
+    } (
+        @omit @sort b,
+        utils.pagination_result(
+            data = (
+                type = al.type,
+                amount = b.amount
+            ).to_gtv_pretty(),
+            rowid = b.rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_locked_asset_aggregated_balance(
+    accounts.account, 
+    assets.asset, 
+    types: list<text>? = null
+) {
+    return (al: linking.account_link, b: assets.balance) @? {
+        al.account == account,
+        al.secondary.type == ACCOUNT_TYPE_LOCK,
+        if (types??) al.type in types else true,        
+        b.account == al.secondary,
+        b.asset == asset
+    } (
+        @omit @group b.asset,
+        @sum b.amount
+    ) ?: 0L;    
+}
+
+function get_locked_asset_balances(
+    accounts.account, 
+    types: list<text>? = null, 
+    page_size: integer? = null, 
+    page_cursor: text? = null
+) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    val assets = (al: linking.account_link, b: assets.balance) @* {
+        al.account == account,
+        al.secondary.type == ACCOUNT_TYPE_LOCK,
+        if (types??) al.type in types else true,        
+        b.account == al.secondary,
+        b.rowid > (before_rowid ?: rowid(0))
+    } (
+        @omit @sort b,
+        utils.pagination_result(
+            data = (
+                type = al.type,
+                asset = assets.map_asset(b.asset),
+                amount = b.amount
+            ).to_gtv_pretty(),
+            rowid = b.rowid
+        )
+
+    ) limit utils.fetch_data_size(page_size);
+
+    return assets;
+}
+
+function get_locked_asset_aggregated_balances(
+    accounts.account, 
+    types: list<text>? = null, 
+    page_size: integer? = null, 
+    page_cursor: text? = null
+) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    val balances = (al: linking.account_link, b: assets.balance) @* {
+        al.account == account,
+        al.secondary.type == ACCOUNT_TYPE_LOCK,
+        if (types??) al.type in types else true,        
+        b.account == al.secondary,
+        b.asset.rowid > (before_rowid ?: rowid(0))
+    } (
+        @sort @group asset = b.asset,
+        @sum amount = b.amount
+    ) limit utils.fetch_data_size(page_size);
+
+    return balances @* {} (
+        utils.pagination_result(
+            data = (
+                asset = assets.map_asset(.asset),
+                amount = .amount
+            ).to_gtv_pretty(),
+            rowid = .asset.rowid
+        )
+    );
+}

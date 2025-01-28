@@ -1,0 +1,36 @@
+@test module;
+
+import ^^.*;
+import lib.ft4.accounts. { single_sig_auth_descriptor };
+import lib.ft4.auth. { evm_signatures };
+import lib.ft4.core.accounts.strategies.open. { ras_open };
+import lib.ft4.external.accounts.{ add_auth_descriptor };
+import lib.ft4.external.accounts.strategies. { get_register_account_message };
+import lib.ft4.test.utils.{ ft_auth_operation_for, evm_auth_operation_for, evm_sign };
+
+val evm_address = x"1337c28e95ce85175af66353fecccd676e3d273a";
+val evm_privkey = x"18e2d37cd5b51555c52d454c22608dee5e7151384f2d7b7bc21616e2eadc3e6f";
+
+function test_evm_registration() {
+    val alice_auth_desc = single_sig_auth_descriptor(evm_address, set(["A", "T"]));
+    val alice_session_1 = rell.test.keypairs.alice;
+    val session1_auth_desc = single_sig_auth_descriptor(alice_session_1.pub, set(["MySession"]));
+
+    val strategy_op = ras_open(alice_auth_desc, session1_auth_desc);
+    val register_op = register_user("Alice");
+
+    val message = get_register_account_message(
+        strategy_op.to_gtx_operation(),
+        register_op.to_gtx_operation()
+    );
+    val signature = evm_sign(message, evm_privkey);
+    // Register account using evm address
+    rell.test.tx()
+        .op(evm_signatures([evm_address], [signature]))
+        .op(strategy_op)
+        .op(register_op)
+        .sign(alice_session_1)
+        .run();
+
+    assert_equals(user @ { } ( @sum 1 ), 1);
+}

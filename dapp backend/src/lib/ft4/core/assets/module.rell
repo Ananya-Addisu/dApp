@@ -1,0 +1,7 @@
+@mount('ft4')
+module;
+
+import ^^.core.accounts;
+import ^^.core.crosschain;
+import ^^.utils;
+import ^^.version;

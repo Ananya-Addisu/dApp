@@ -1,0 +1,16 @@
+module;
+
+import lib.ft4.accounts.{ account };
+import lib.ft4.auth;
+
+function require_task(
+    task_id: byte_array
+) = require(
+    task @? {
+        task_id
+    },
+    "task with id %s is not in your to-do-list"
+        .format(
+            task_id
+        )
+);

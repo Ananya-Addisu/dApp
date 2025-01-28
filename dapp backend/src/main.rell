@@ -1,0 +1,6 @@
+module;
+
+import to_do.*;
+import registration.*;
+
+query list_accounts() = account @* { } ( $.to_struct() );

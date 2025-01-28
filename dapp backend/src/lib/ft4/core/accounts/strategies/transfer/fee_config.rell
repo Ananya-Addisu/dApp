@@ -1,0 +1,48 @@
+val _CONFIG_ERROR_TEXT_TEMPLATE = "Error in moduleArgs (%s): %s";
+
+struct fee_asset {
+    id: byte_array? = null;
+    issuing_blockchain_rid: byte_array? = null;
+    name: text? = null;
+    amount: big_integer;
+}
+
+function resolve_fee_assets(config: list<fee_asset>): map<byte_array, big_integer> {
+    val fee_assets = map<byte_array, big_integer>();
+    for (fee_asset in config) {
+        val asset_id = fee_asset.id ?:
+            assets.asset @? { .name == fee_asset.name!!, .issuing_blockchain_rid == fee_asset.issuing_blockchain_rid!! } (.id);
+        if (asset_id != null) fee_assets[asset_id] = fee_asset.amount;
+    }
+    return fee_assets;
+}
+
+function parse_fee_assets(gtv, module_name: text): list<fee_asset> {
+    if (utils.is_dict(gtv)) {
+        val input = map<name, gtv>.from_gtv_pretty(gtv);
+        return [parse_fee_asset(input, module_name)];
+    } else if (utils.is_list(gtv)) {
+        val inputs = list<map<name, gtv>>.from_gtv_pretty(gtv);
+        return inputs @* {} (parse_fee_asset($, module_name));
+    }
+    else {
+        require(
+            false,
+            _CONFIG_ERROR_TEXT_TEMPLATE.format(module_name, "asset only accepts a list of ids and amounts.")
+        );
+        return []; // will never happen
+    }
+}
+
+function parse_fee_asset(input: map<name, gtv>, module_name: text): fee_asset {
+    require("id" in input or "name" in input, _CONFIG_ERROR_TEXT_TEMPLATE.format(module_name, "fee asset needs to have either 'id' or 'name'"));
+    require(not ("id" in input and "name" in input), _CONFIG_ERROR_TEXT_TEMPLATE.format(module_name, "fee asset cannot have both 'id' and 'name'"));
+    return fee_asset(
+        id = if ("id" in input) byte_array.from_gtv(input["id"]) else null,
+        issuing_blockchain_rid = if ("name" in input)
+            (if ("issuing_blockchain_rid" in input) byte_array.from_gtv(input["issuing_blockchain_rid"]) else chain_context.blockchain_rid)
+            else null,
+        name = if ("name" in input) text.from_gtv(input["name"]) else null,
+        amount = parse_amount(input["amount"])
+    );
+}

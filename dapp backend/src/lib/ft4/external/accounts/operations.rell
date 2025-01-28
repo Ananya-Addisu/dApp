@@ -1,0 +1,156 @@
+
+function delete_auth_descriptor_message(gtv) {
+    val params = struct<delete_auth_descriptor>.from_gtv(gtv);
+    return "Please sign the message\nto delete auth descriptor:\n%s\n\nfrom account\n{account_id}".format(params.auth_descriptor_id);
+}
+
+function delete_auth_descriptor_resolver(args: gtv, account_id: byte_array, auth_descriptor_ids: list<byte_array>) {
+    val params = struct<delete_auth_descriptor>.from_gtv(args);
+    if (params.auth_descriptor_id in auth_descriptor_ids) return params.auth_descriptor_id;
+
+    for (ad in accounts.account_auth_descriptor @* { .account.id == account_id, .id in auth_descriptor_ids }) {
+        if (accounts.has_flags(ad, ["A"])) return ad.id;
+    }
+
+    return null;
+}
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(delete_auth_descriptor).mount_name,
+    flags = [],
+    message = delete_auth_descriptor_message(*),
+    resolver = delete_auth_descriptor_resolver(*)
+);
+
+operation delete_auth_descriptor(auth_descriptor_id: byte_array) {
+    val account = auth.authenticate();
+    accounts.delete_auth_descriptor(
+        accounts.auth_descriptor_by_id(account, auth_descriptor_id)
+    );
+}
+
+function delete_auth_descriptors_for_signer_message(gtv) {
+    val params = struct<delete_auth_descriptors_for_signer>.from_gtv(gtv);
+    return "Please sign the message\nto delete all auth descriptor for signer:\n%s\n\nfrom account\n{account_id}".format(params.signer);
+}
+
+function delete_auth_descriptors_for_signer_resolver(args: gtv, account_id: byte_array, auth_descriptor_ids: list<byte_array>) {
+    val params = struct<delete_auth_descriptors_for_signer>.from_gtv(args);
+
+    val ads = (a_ad: accounts.account_auth_descriptor, ad_s: accounts.auth_descriptor_signer) @* {
+        a_ad.account.id == account_id,
+        ad_s.account_auth_descriptor == a_ad,
+        ad_s.id == params.signer,
+        a_ad.auth_type == accounts.auth_type.S,
+        a_ad.id in auth_descriptor_ids
+    } (a_ad.id);
+    if (not ads.empty()) {
+        return ads[0];
+    }
+
+    for (ad in accounts.account_auth_descriptor @* { .account.id == account_id, .id in auth_descriptor_ids }) {
+        if (accounts.has_flags(ad, ["A"])) return ad.id;
+    }
+
+    return null;
+}
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(delete_auth_descriptors_for_signer).mount_name,
+    flags = [],
+    message = delete_auth_descriptors_for_signer_message(*),
+    resolver = delete_auth_descriptors_for_signer_resolver(*)
+);
+
+operation delete_auth_descriptors_for_signer(signer: byte_array) {
+    val account = auth.authenticate();
+
+    val ads = (a_ad: accounts.account_auth_descriptor, ad_s: accounts.auth_descriptor_signer) @* {
+        a_ad.account == account,
+        ad_s.account_auth_descriptor == a_ad,
+        ad_s.id == signer
+    } (a_ad);
+    for (ad in ads) {
+        accounts.delete_auth_descriptor(ad);
+    }
+}
+
+function delete_all_auth_descriptors_except_main_message(gtv) {
+    return "Please sign the message\nto delete all auth descriptors except main\nfrom account:\n{account_id}";
+}
+
+function delete_all_auth_descriptors_except_main_resolver(args: gtv, account_id: byte_array, auth_descriptor_ids: list<byte_array>) {
+    val main_auth_descriptor = require(
+        accounts.main_auth_descriptor @? { .account.id == account_id } .auth_descriptor,
+        "Account <%s> does not have main auth descriptor set".format(account_id)
+    );
+
+    return if (main_auth_descriptor.id in auth_descriptor_ids) main_auth_descriptor.id else null;
+}
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(delete_all_auth_descriptors_except_main).mount_name,
+    flags = ["A"],
+    message = delete_all_auth_descriptors_except_main_message(*),
+    resolver = delete_all_auth_descriptors_except_main_resolver(*)
+);
+
+operation delete_all_auth_descriptors_except_main() {
+    val account = auth.authenticate();
+    accounts.delete_all_auth_descriptors_except_main(account);
+}
+
+function add_auth_descriptor_message(gtv) {
+    val params = struct<add_auth_descriptor>.from_gtv(gtv);
+    val flags = params.new_desc.args[0];
+
+    return "Please sign the message\nto add auth descriptor\nwith flags:\n%s\n\nto account:\n{account_id}".format(flags);
+}
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(add_auth_descriptor).mount_name,
+    flags = ["A"],
+    message = add_auth_descriptor_message(*)
+);
+
+operation add_auth_descriptor(new_desc: accounts.auth_descriptor) {
+    val account = auth.authenticate();
+    val signers = accounts.get_signers(new_desc);
+    auth.verify_signers(signers);
+    accounts.add_auth_descriptor(account, new_desc);
+}
+
+function update_main_auth_descriptor_message(gtv) {
+    val params = struct<update_main_auth_descriptor>.from_gtv(gtv);
+    val flags = params.new_desc.args[0];
+    val signers = accounts.get_signers(params.new_desc);
+
+    return "Please sign the message to\nset new main auth descriptor\n\nwith flags:\n%s\n\nand signers:\n%s\n\nof account:\n{account_id}".format(flags, signers);
+}
+
+function update_main_auth_descriptor_resolver(args: gtv, account_id: byte_array, auth_descriptor_ids: list<byte_array>) {
+    val main_auth_descriptor = require(
+        accounts.main_auth_descriptor @? { .account.id == account_id } .auth_descriptor,
+        "Account <%s> does not have main auth descriptor set".format(account_id)
+    );
+
+    return if (main_auth_descriptor.id in auth_descriptor_ids) main_auth_descriptor.id else null;
+}
+
+@extend(auth.auth_handler)
+function () = auth.add_overridable_auth_handler(
+    scope = rell.meta(update_main_auth_descriptor).mount_name,
+    flags = ["A"],
+    message = update_main_auth_descriptor_message(*),
+    resolver = update_main_auth_descriptor_resolver(*)
+);
+
+operation update_main_auth_descriptor(new_desc: accounts.auth_descriptor) {
+    val account = auth.authenticate();
+    auth.verify_signers(accounts.get_signers(new_desc));
+    accounts.update_main_auth_descriptor(account, new_desc);
+}

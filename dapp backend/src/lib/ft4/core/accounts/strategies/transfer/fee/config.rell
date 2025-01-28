@@ -1,0 +1,10 @@
+val MODULE_NAME = "lib.ft4.core.accounts.strategy.transfer.fee";
+
+struct module_args {
+    asset: gtv;
+    fee_account: byte_array? = null;
+}
+
+function fee_assets(): list<transfer.fee_asset> = transfer.parse_fee_assets(chain_context.args.asset, MODULE_NAME);
+
+function fee_account_id(): byte_array? = chain_context.args.fee_account;

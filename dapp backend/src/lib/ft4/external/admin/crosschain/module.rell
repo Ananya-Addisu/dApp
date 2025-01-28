@@ -1,0 +1,31 @@
+@mount("ft4.admin")
+module;
+
+import ^^^.core.admin;
+import ^^^.assets;
+import ^^^.crosschain;
+
+operation register_crosschain_asset(
+    id: byte_array,
+    name,
+    symbol: text,
+    decimals: integer,
+    issuing_blockchain_rid: byte_array,
+    icon_url: text,
+    type: text,
+    uniqueness_resolver: byte_array,    
+    origin_blockchain_rid: byte_array
+) {
+    admin.require_admin();
+    crosschain.Unsafe.register_crosschain_asset(
+        id,
+        name, 
+        symbol, 
+        decimals, 
+        issuing_blockchain_rid, 
+        icon_url,
+        type,        
+        uniqueness_resolver,
+        origin_blockchain_rid
+    );
+}

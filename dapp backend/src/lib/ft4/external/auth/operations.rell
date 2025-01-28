@@ -1,0 +1,22 @@
+
+operation evm_auth(
+    account_id: byte_array,
+    auth_descriptor_id: byte_array,
+    signatures: list<auth.signature?>
+) {
+    auth.require_regular_next_operation();
+}
+
+operation evm_signatures(
+    signers: list<byte_array>, 
+    signatures: list<auth.signature?>
+) {
+    auth.require_evm_signatures_can_be_used();
+}
+
+operation ft_auth(
+    account_id: byte_array,
+    auth_descriptor_id: byte_array
+) {
+    auth.require_regular_next_operation();
+}

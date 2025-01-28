@@ -1,0 +1,303 @@
+
+val ASSET_TYPE_FT4 = "ft4";
+
+entity asset {
+    key id: byte_array;
+
+    name: text;
+    symbol: text;
+    decimals: integer;
+    issuing_blockchain_rid: byte_array;
+    mutable icon_url: text;
+    type: text = ASSET_TYPE_FT4;
+    mutable total_supply: big_integer;
+    uniqueness_resolver: byte_array = x"";
+
+    key issuing_blockchain_rid, name, uniqueness_resolver;
+    key issuing_blockchain_rid, symbol, uniqueness_resolver;
+
+    index name;
+    index symbol;
+    index type;
+}
+
+function Asset(id: byte_array) = require(
+    asset @? { id },
+    "Asset <%s> not found".format(id)
+);
+
+entity balance {
+    key accounts.account, asset;
+    mutable amount: big_integer;
+}
+
+val max_asset_amount = big_integer.from_hex("ff".repeat(32));
+
+function increase_balance(accounts.account, asset, amount: big_integer): big_integer {
+    val balance = balance @? { account, asset };
+    if (balance != null) {
+        val new_amount = balance.amount + amount;
+        balance.amount = new_amount;
+        return new_amount;
+    } else {
+        create balance(account, asset, amount);
+        return amount;
+    }
+}
+
+function deduct_balance(accounts.account, asset, amount: big_integer): big_integer {
+    val balance = balance @? { account, asset };
+    require(balance, "User does not have asset <%s> in account <%s>".format(asset.id, account.id));
+    require(balance.amount >= amount, "Balance is too low");
+
+   if (balance.amount - amount == 0L) {
+       delete balance;
+       return 0L;
+   } else {
+       val new_amount = balance.amount - amount;
+       balance.amount = new_amount;
+       return new_amount;
+   }
+}
+
+function get_asset_balance(accounts.account, asset): big_integer {
+    val balance = balance @? {asset, account};
+    return if (balance != null) balance.amount else 0L;
+}
+
+function map_asset(asset: asset) {
+    return (
+        id = asset.id,
+        name = asset.name,
+        symbol = asset.symbol,
+        decimals = asset.decimals,
+        blockchain_rid = asset.issuing_blockchain_rid,
+        icon_url = asset.icon_url,
+        type = asset.type,
+        supply = asset.total_supply
+    );
+}
+
+function get_paginated_asset_balances(account_id: byte_array, page_size: integer?, page_cursor: text?): list<utils.pagination_result> {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return balance @* {
+        .account.id == account_id,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (
+                asset = map_asset(.asset),
+                amount = .amount
+            ).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_assets_by_type(type: text, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return asset @* {
+        type,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (map_asset($)).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_all_assets(page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return asset @* {
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (map_asset($)).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_asset_balances(account_id: byte_array) {
+    return balance @* { .account.id == account_id } (
+        asset = map_asset(.asset),
+        amount = .amount
+    );
+}
+
+function format_amount_with_decimals(amount: big_integer, decimals: integer): text {
+    require(decimals >= 0, "Decimals must be non-negative. Received: %s".format(decimals));
+    var amt = amount.to_text();
+    if (decimals == 0) {
+        return amt;
+    } else if (amt.size() > decimals) {
+        amt = amt.sub(0, amt.size() - decimals) + "." + amt.sub(amt.size() - decimals);
+    } else {
+        amt = "0." + "0".repeat(decimals - amt.size()) + amt;
+    }
+    return amt;
+}
+
+function get_paginated_assets_by_name(name, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return asset @* {
+        .name == name,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (map_asset($)).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_paginated_assets_by_symbol(symbol: text, page_size: integer?, page_cursor: text?) {
+    val before_rowid = utils.before_rowid(page_cursor);
+    return asset @* {
+        .symbol == symbol,
+        .rowid > (before_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (map_asset($)).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_asset_details_for_crosschain_registration(asset_id: byte_array) {
+    val asset = asset @? { .id == asset_id } (
+        id = .id,
+        name = .name,
+        symbol = .symbol,
+        decimals = .decimals,
+        blockchain_rid = .issuing_blockchain_rid,        
+        icon_url = .icon_url,
+        type = .type,
+        uniqueness_resolver = .uniqueness_resolver
+    );
+
+    return require(asset, "Asset <%s> not found.".format(asset_id));
+}
+
+function require_zero_exclusive_asset_amount_limits(value: big_integer, name) {
+    require(
+        value <= max_asset_amount, 
+        "%s: value must be lower than 2^256, actual: %d".format(name, value)
+    );
+    require(
+        value > 0L, 
+         "%s: value must be non-zero positive, actual: %d".format(name, value)
+    );
+}
+
+function parse_icon_url(icon_url: text): text {
+    val trimmed_icon_url = icon_url.trim();
+    require(
+        (trimmed_icon_url == "") or (trimmed_icon_url.size() <= 2048 and trimmed_icon_url.matches('^\\S+:\\/\\/[^\\s$.?#].[^\\s]*$')),
+        "Invalid URL for icon"
+    );
+    return trimmed_icon_url;
+}
+
+function validate_asset_decimals(decimals: big_integer) {
+    require(decimals >= 0 and decimals < 79, "Decimals must be between 0 and 78 (included)");
+}
+
+function validate_asset_id(id: byte_array) {
+    require(id.size() == 32, "Invalid asset ID length <%d>, must be <32>".format(id.size()));
+}
+
+function validate_asset_name(name) {
+    require(name.size() <= 1024, "Asset name cannot be longer than 1024 characters");
+}
+
+function validate_asset_symbol(symbol: text) {
+    require(symbol.size() <= 1024, "Asset symbol cannot be longer than 1024 characters");
+}
+
+function validate_asset_type(type: text) {
+    require(type.size() > 0, "Asset type cannot be an empty string");
+    require(type.size() <= 1024, "Asset type cannot be longer than 1024 characters");
+}
+
+function validate_asset_uniqueness_resolver(res: byte_array) {
+    require(res.size() <= 1024, "Asset uniqueness resolver cannot be longer than 1024 characters");
+}
+
+namespace Unsafe {
+    function mint(accounts.account, asset, amount: big_integer) {
+        require_zero_exclusive_asset_amount_limits(amount, "Parameter amount");
+        require(
+            asset.issuing_blockchain_rid == chain_context.blockchain_rid,
+            "Assets can only be minted on issuing chain"
+        );
+        before_mint(account, asset, amount);
+        increase_balance(account, asset, amount);
+
+        asset.total_supply += amount;
+
+        require(asset.total_supply <= max_asset_amount, "End total supply must be lower than 2^256");
+
+        create transfer_history_entry(
+            account,
+            asset,
+            .delta = amount,
+            .op_index = op_context.op_index,
+            .is_input = false
+        );
+
+        after_mint(account, asset, amount);
+    }
+
+    function burn(accounts.account, asset, amount: big_integer) {
+        require_zero_exclusive_asset_amount_limits(amount, "Parameter amount");
+        require(
+            asset.issuing_blockchain_rid == chain_context.blockchain_rid,
+            "Assets can only be burned on issuing chain"
+        );
+        require(get_asset_balance(account, asset) >= amount, "Insufficient balance");
+
+        before_burn(account, asset, amount);
+
+        deduct_balance(account, asset, amount);
+
+        asset.total_supply -= amount;
+
+        create transfer_history_entry (
+            account,
+            asset,
+            .delta = amount,
+            .op_index = op_context.op_index,
+            .is_input = true
+        );
+        after_burn(account, asset, amount);
+    }
+
+    function register_asset(
+        name,
+        symbol: text,
+        decimals: integer,
+        blockchain_rid: byte_array,
+        icon_url: text,
+        type: text = ASSET_TYPE_FT4
+    ): asset {
+        utils.validate_blockchain_rid(blockchain_rid);
+        validate_asset_decimals(decimals);
+        validate_asset_name(name);
+        validate_asset_symbol(symbol);
+        validate_asset_type(type);
+
+        val id = (name, blockchain_rid).hash();
+        return create asset (
+            id,
+            name,
+            symbol,
+            decimals,
+            issuing_blockchain_rid=blockchain_rid,
+            icon_url = parse_icon_url(icon_url),
+            type=type,
+            total_supply=0L
+        );
+    }
+}

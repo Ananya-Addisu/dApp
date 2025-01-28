@@ -1,0 +1,28 @@
+blockchains:
+  to_do_project:
+    webStatic: out # this attribute
+    module: main
+    moduleArgs:
+      lib.ft4.core.auth:
+        evm_signatures_authorized_operations:
+          - register_user
+    test:
+      modules:
+        - test
+        - registration.test     
+compile:
+  rellVersion: 0.13.14
+database:
+  schema: schema_my_rell_dapp
+  host: localhost
+  username: postchain
+  password: postchain
+  database: postchain
+libs:
+  ft4:
+    registry: https://gitlab.com/chromaway/ft4-lib.git
+    path: rell/src/lib/ft4
+    tagOrBranch: v1.0.0r
+    rid: x"FA487D75E63B6B58381F8D71E0700E69BEDEAD3A57D1E6C1A9ABB149FAC9E65F"
+    insecure: false
+  

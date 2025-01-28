@@ -1,0 +1,107 @@
+import ^.assets;
+import ^.accounts;
+
+entity applied_transfers {
+    key init_tx_rid, init_op_index;
+    init_tx_rid: byte_array;
+    init_op_index: integer;
+    transaction;
+    op_index: integer;
+}
+
+entity canceled_transfers {
+    key init_tx_rid, init_op_index;
+    init_tx_rid: byte_array;
+    init_op_index: integer;
+}
+
+entity unapplied_transfers {
+    key init_tx_rid, init_op_index;
+    init_tx_rid: byte_array;
+    init_op_index: integer;
+}
+
+entity recalled_transfers {
+    key init_tx_rid, init_op_index;
+    init_tx_rid: byte_array;
+    init_op_index: integer;
+}
+
+entity pending_transfer {
+    key transaction, op_index; 
+    op_index: integer;
+    index sender: accounts.account;
+}
+
+entity reverted_transfer {
+    key init_tx_rid, init_op_index;
+    init_tx_rid: byte_array;
+    init_op_index: integer;
+}
+
+namespace Unsafe {
+
+    function update_balances_if_needed(
+        sender: accounts.account,
+        recipient: accounts.account,
+        assets.asset,
+        amount: big_integer
+    ) {
+        require(
+            sender != recipient,
+            "Cannot transfer to own account"
+        );
+        require(
+            chain_context.blockchain_rid != sender.id,
+            "Cannot transfer from this blockchain's account"
+        );
+        require(
+            chain_context.blockchain_rid != recipient.id,
+            "Cannot transfer to this blockchain's account"
+        );
+        assets.require_zero_exclusive_asset_amount_limits(
+            amount,
+            "Parameter amount"
+        );
+
+        val origin_blockchain_rid = asset_origin @? { asset } .origin_blockchain_rid;
+        val is_sender_blockchain =  sender.type == ACCOUNT_TYPE_BLOCKCHAIN;
+        val is_recipient_blockchain = recipient.type == ACCOUNT_TYPE_BLOCKCHAIN;
+        
+        if (
+            not exists(origin_blockchain_rid)
+            or not is_sender_blockchain
+            or origin_blockchain_rid != sender.id
+        ) {
+            assets.deduct_balance(
+                sender,
+                asset, 
+                amount
+            );
+        }
+
+        create assets.transfer_history_entry(
+            .account = sender,
+            .asset = asset,
+            .delta = amount,
+            .op_index = op_context.op_index,
+            .is_input = true
+        );
+
+        if (
+            not exists(origin_blockchain_rid)
+            or not is_recipient_blockchain
+            or origin_blockchain_rid != recipient.id
+        ) {
+            assets.increase_balance(recipient, asset, amount);
+        }
+
+        create assets.transfer_history_entry(
+            .account = recipient,
+            .asset = asset,
+            .delta = amount,
+            .op_index = op_context.op_index,
+            .is_input = false
+        );
+    }
+}

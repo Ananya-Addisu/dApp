@@ -1,0 +1,73 @@
+@mount('ft4.crosschain')
+module;
+
+import ^^.utils;
+import ^^.core.assets;
+
+@extendable
+function is_create_on_crosschain_transfer_enabled(): boolean = false;
+
+@extendable
+function create_on_crosschain_transfer(
+   sender_blockchain_rid: byte_array,
+   sender_id: byte_array,
+   recipient_id: byte_array,
+   assets.asset,
+   amount: big_integer
+);
+
+@extendable
+function recall_on_crosschain_transfer(
+    sender_blockchain_rid: byte_array,
+    sender_id: byte_array,
+    transfer_tx_rid: byte_array,
+    transfer_op_index: integer
+);
+
+function get_paginated_pending_transfers(
+    account_id: byte_array,
+    page_size: integer?,
+    page_cursor: text?
+) {
+    val after_rowid = utils.before_rowid(page_cursor);
+
+    return pending_transfer @* {
+        .sender.id == account_id,
+        .rowid > (after_rowid ?: rowid(0))
+    } (
+        utils.pagination_result(
+            data = (
+                tx_data = .transaction.tx_data,
+                op_index = .op_index,
+                account_id = .sender.id
+            ).to_gtv_pretty(),
+            rowid = .rowid
+        )
+    ) limit utils.fetch_data_size(page_size);
+}
+
+function get_last_pending_transfer_for_account(
+    sender_id: byte_array, 
+    target_blockchain_rid: byte_array, 
+    recipient_id: byte_array, 
+    asset_id: byte_array, 
+    amount: big_integer
+) = (
+    pt: pending_transfer, 
+    cth: assets.crosschain_transfer_history_entry
+) @? {
+    cth.blockchain_rid == target_blockchain_rid,
+    cth.account_id == recipient_id,
+    cth.asset.id == asset_id,
+    cth.delta == amount,
+    cth.is_input == false,
+
+    pt.sender.id == sender_id,
+    pt.transaction == cth.transaction,
+    pt.op_index == cth.op_index
+} (
+    @omit @sort_desc pt.rowid,
+    tx_data = pt.transaction.tx_data,
+    op_index = pt.op_index,
+    account_id = pt.sender.id
+) limit 1;

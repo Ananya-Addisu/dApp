@@ -1,0 +1,90 @@
+@mount("ft4")
+module;
+
+import ^^^.core.accounts;
+import ^^^.core.auth;
+
+function get_strategy(strategy_name: name): _strategy {
+    val strategies = strategy();
+    require(strategy_name in strategies, "Strategy <%s> is not loaded or does not exist.".format(strategy_name));
+    return strategies[strategy_name];
+}
+
+function is_strategy_op(op: gtx_operation): boolean {
+    val strategy_operations = strategy().values() @* {} ($.op.mount_name);
+    return op.name in strategy_operations;
+}
+
+function register_account(): accounts.account {
+    val tx_operations = op_context.get_all_operations();
+    val strategy_op = tx_operations[op_context.op_index-1];
+    val strategy_name = strategy_op.name;
+    val strategy_params = strategy_op.args.to_gtv();
+
+    val strategy = get_strategy(strategy_name);
+    val account_details = strategy.account_details(strategy_params);
+
+    var signers = accounts.get_signers(account_details.main);
+    if (account_details.disposable??) {
+        signers.add_all(accounts.get_signers(account_details.disposable!!));
+    }
+
+    val message = get_register_account_message(strategy_op, op_context.get_current_operation());
+    auth.verify_signers_with_message(signers, message);
+
+    val account_id = account_details.account_id;
+
+    before_register_account(account_id);
+
+    val account = accounts.create_account_with_auth(account_details.main, account_id);
+    if (account_details.disposable??) {
+        accounts.add_auth_descriptor(account, account_details.disposable!!);
+    }
+
+    strategy.action(account, strategy_params);
+
+    after_register_account(account);
+
+    return account;
+}
+
+@extendable function before_register_account(account_id: byte_array);
+
+@extendable function after_register_account(accounts.account);
+
+@extendable 
+function strategy(): map<name, _strategy>;
+
+struct _strategy {
+    op: rell.meta;
+    account_details: (gtv) -> account_details;
+    action: (accounts.account, gtv) -> unit;
+}
+
+struct account_details {
+    account_id: byte_array;
+    main: accounts.auth_descriptor;
+    disposable: accounts.auth_descriptor? = null;
+}
+
+function add_strategy(op: rell.meta, account_details: (gtv) -> account_details, action: ((accounts.account, gtv) -> unit)? = null)
+    = [op.mount_name: _strategy(op, account_details, action ?: _no_action(*))];
+
+function _no_action(accounts.account, strategy_params: gtv) {}
+
+function require_register_account_next_operation() {
+    val all_operations = op_context.get_all_operations();
+    val this_op = op_context.get_all_operations()[op_context.op_index];
+    
+    require(
+        all_operations.size() > op_context.op_index + 1,
+        "<%s> must be followed by a register account operation".format(this_op.name)
+    );
+    
+    val next_op = all_operations[op_context.op_index + 1];
+
+    require(
+        auth.is_evm_signatures_authorized_operation(next_op.name),
+        "<%s> operation must be followed by a register account operation, not <%s>".format(this_op.name, next_op.name)
+    );
+}

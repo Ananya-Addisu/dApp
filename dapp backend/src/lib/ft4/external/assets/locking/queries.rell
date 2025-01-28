@@ -1,0 +1,81 @@
+
+query get_lock_accounts(account_id: byte_array) {
+    val accounts = locking.get_lock_accounts(accounts.Account(account_id));
+    return accounts @* {} (
+        id = $.account.id,
+        type = $.type
+    );    
+}
+
+query get_lock_accounts_with_non_zero_balances(account_id: byte_array) {
+    val accounts = locking.get_lock_accounts_with_non_zero_balances(accounts.Account(account_id));
+    return accounts @* {} (
+        id = $.account.id,
+        type = $.type
+    );
+}
+
+query get_locked_asset_balance(
+    account_id: byte_array,
+    asset_id: byte_array,
+    types: list<text>? = null,
+    page_size: integer? = null,
+    page_cursor: text? = null
+) {
+    return utils.make_page(
+        locking.get_locked_asset_balance(
+            accounts.Account(account_id),
+            assets.Asset(asset_id),
+            types,
+            page_size,
+            page_cursor
+        ),
+        page_size
+    );
+}
+
+query get_locked_asset_aggregated_balance(
+    account_id: byte_array,
+    asset_id: byte_array,
+    types: list<text>? = null
+) {
+    return locking.get_locked_asset_aggregated_balance(
+        accounts.Account(account_id),
+        assets.Asset(asset_id),
+        types
+    );
+}
+
+query get_locked_asset_balances(
+    account_id: byte_array, 
+    types: list<text>? = null, 
+    page_size: integer? = null, 
+    page_cursor: text? = null
+) {
+    return utils.make_page(
+        locking.get_locked_asset_balances(
+            accounts.Account(account_id),
+            types,
+            page_size,
+            page_cursor
+        ),
+        page_size
+    );
+}   
+
+query get_locked_asset_aggregated_balances(
+    account_id: byte_array, 
+    types: list<text>? = null, 
+    page_size: integer? = null, 
+    page_cursor: text? = null
+) {
+    return utils.make_page(
+        locking.get_locked_asset_aggregated_balances(
+            accounts.Account(account_id),
+            types,
+            page_size,
+            page_cursor
+        ),
+        page_size
+    );
+}

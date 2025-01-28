@@ -1,0 +1,28 @@
+@mount("ft4")
+module;
+
+import ^^^^.core.accounts;
+import ^^^^.core.accounts.strategies;
+
+operation ras_open(
+    main: accounts.auth_descriptor,
+    disposable: accounts.auth_descriptor? = null
+) {
+    strategies.require_register_account_next_operation();
+}
+
+function account_details(gtv) {
+    val params = struct<ras_open>.from_gtv(gtv);
+    val signers = accounts.get_signers(params.main);
+    return strategies.account_details(
+        account_id = accounts.get_account_id_from_signers(signers),
+        main = params.main,
+        disposable = params.disposable
+    );
+}
+
+@extend(strategies.strategy)
+function () = strategies.add_strategy(
+    op = rell.meta(ras_open),
+    account_details = account_details(*)
+);

@@ -1,0 +1,22 @@
+@mount("ft4.admin")
+module;
+
+import ^^.core.accounts;
+import ^^.core.assets;
+import ^^.utils;
+import ^^.version;
+
+struct module_args {
+    admin_pubkey: pubkey;
+}
+
+function require_admin() {
+    require(
+        op_context.is_signer(chain_context.args.admin_pubkey),
+        "Expected admin signature"
+    );
+}
+
+function get_admin_pubkey() {
+    return chain_context.args.admin_pubkey;
+}

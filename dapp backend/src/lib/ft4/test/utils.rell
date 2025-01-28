@@ -1,0 +1,114 @@
+@test
+module;
+
+import ^^.auth;
+import ^^.accounts;
+import ^^.utils.{ derive_nonce };
+
+/**
+ * Creates an `ft_auth` operation for a specific signer.
+ * If more than one auth descriptor exists for the signer, first one found is chosen.
+ */
+function ft_auth_operation_for(signer: byte_array) {
+    val descriptor = require(
+        accounts.auth_descriptor_signer @? { signer }.account_auth_descriptor limit 1,
+        "No auth descriptor found for signer %s".format(signer)
+    );
+
+    return auth.external.ft_auth(descriptor.account.id, descriptor.id);
+}
+
+/**
+ * Creates an `evm_auth` operation by signing an operation using [evm_sign].
+ * The associated account is derived from the evm privkey.
+ * If more than one auth_descriptor exists the first one will be chosen.
+ */
+function evm_auth_operation_for(evm_privkey: byte_array, op: rell.test.op) {
+    val evm_address = crypto.eth_privkey_to_address(evm_privkey);
+    val descriptor = require(
+        accounts.auth_descriptor_signer @? { evm_address }.account_auth_descriptor limit 1,
+        "No auth descriptor found for address %s".format(evm_address)
+    );
+    val evm_message = create_evm_auth_message_for_account(op, descriptor, descriptor.ctr);
+    val evm_signature = evm_sign(evm_message, evm_privkey);
+    return auth.external.evm_auth(descriptor.account.id, descriptor.id, [evm_signature]);
+}
+
+/**
+ * Create the message to be signed with [evm_sign].
+ */
+function create_evm_auth_message_for_account(
+        op: rell.test.op,
+        descriptor: accounts.account_auth_descriptor,
+        ctr: integer = 0
+) = auth.create_message_from_template(
+        auth.evm_auth_args(
+            account = descriptor.account,
+            descriptor,
+            signatures = []
+        ),
+        auth.get_auth_message_template(op.name, op.args.to_gtv()),
+        op.args,
+        derive_nonce(op.to_gtx_operation(), ctr)
+    );
+
+/**
+ * Create the message to be signed with [evm_sign].
+ */
+function create_evm_auth_message(op: rell.test.op) =
+    auth.get_auth_message_template(op.name, op.args.to_gtv())
+        .replace(
+            auth.BLOCKCHAIN_RID_PLACEHOLDER,
+            chain_context.blockchain_rid.to_hex().upper_case()
+        )
+        .replace(auth.NONCE_PLACEHOLDER, derive_nonce(op.to_gtx_operation(), 0));
+
+/**
+ * Signs a message using an EVM key.
+ */
+function evm_sign(message: text, evm_privkey: byte_array): auth.signature {
+    val sig = crypto.eth_sign(
+            auth._evm_message_hash(message),
+            evm_privkey
+        );
+
+    return auth.signature(
+        r=sig[0],
+        s=sig[1],
+        v=sig[2] + 27
+    );
+}
+
+/**
+ * Creates a single-signature auth descriptor.
+ */
+function create_auth_descriptor(
+    signer: byte_array,
+    permissions: list<text> = ["T"],
+    rules: gtv = null.to_gtv()
+) = accounts.auth_descriptor(
+        accounts.auth_type.S,
+        [
+            set(permissions).to_gtv(),
+            signer.to_gtv()
+        ],
+        rules
+    );
+
+/**
+ * Creates a multi-signature auth descriptor.
+ */
+function create_multisig_auth_descriptor(
+    signatures_required: integer,
+    signers: list<byte_array>,
+    permissions: list<text> = ["T"],
+    rules: gtv = null.to_gtv()
+) = accounts.auth_descriptor(
+        accounts.auth_type.M,
+        [
+            set(permissions).to_gtv(),
+            signatures_required.to_gtv(),
+            signers.to_gtv()
+        ],
+        rules
+    );

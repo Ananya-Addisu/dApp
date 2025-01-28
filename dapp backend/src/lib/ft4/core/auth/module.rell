@@ -1,0 +1,215 @@
+@mount('ft4')
+module;
+
+import ^^.core.accounts;
+import ^^.core.accounts.strategies;
+import ^^.utils;
+import ^^.version;
+
+import ^^.external.auth.{
+    evm_signatures
+};
+
+struct module_args {
+    evm_signatures_authorized_operations: gtv? = null;
+}
+
+struct auth_data {
+    flags: list<text>;
+    message: text;
+}
+
+struct _auth_handler {
+    flags: list<text>;
+    message_formatter: ((gtv) -> text)? = null;
+    resolver: ((gtv, byte_array, list<byte_array>) -> byte_array?)? = null;
+}
+
+/*
+ * The constant that defines app level authentication scope.
+ * If scope is omitted when defining an auth handler, then
+ * it has 'app' scope, i.e. it is used to authenticate 
+ * operations that do not have own auth handlers or if 
+ * there is no mount point auth handler for the operation.
+ */
+val APP_SCOPE = "app";
+
+/*
+ * Extendable function used to define auth handlers. 
+ * When called it returns a list of all auth handlers defined
+ * in the dapp.
+ */
+@extendable 
+function auth_handler(): map<name, _auth_handler>;
+
+/*
+ * Finds auth handler for provided operation name.
+ */
+function get_auth_handler(op_name: name) {
+    require_valid_scope_name(op_name);
+    val auth_handlers = auth_handler();
+    if (op_name in auth_handlers) return auth_handlers[op_name];
+    val override_name = "__override__" + op_name;
+    if (override_name in auth_handlers) return auth_handlers[override_name];
+
+    val handler = get_mount_scope_auth_handler(auth_handlers, op_name);
+    if (handler??) return handler;
+
+    require(
+        auth_handlers.get_or_null(APP_SCOPE),
+        "Cannot find auth handler for operation <%s>".format(op_name)
+    );
+    return auth_handlers[APP_SCOPE];
+}
+
+function add_auth_handler(
+    scope: text = APP_SCOPE, 
+    flags: list<text>,
+    message: ((gtv) -> text)? = null,
+    resolver: ((gtv, byte_array, list<byte_array>) -> byte_array?)? = null
+) = [valid_scope_name(scope): _auth_handler(flags, message, resolver)];
+
+function add_overridable_auth_handler(
+    scope: text = APP_SCOPE,
+    flags: list<text>,
+    message: ((gtv) -> text)? = null,
+    resolver: ((gtv, byte_array, list<byte_array>) -> byte_array?)? = null
+) = ["__override__" + valid_scope_name(scope): _auth_handler(flags, message, resolver)];
+
+function valid_scope_name(scope: text) {
+    val scope_name = scope.trim();
+    require_valid_scope_name(scope_name);
+    return scope_name;
+}
+
+function args() = op_context.get_current_operation().args.to_gtv();
+
+struct signature {
+    r: byte_array;
+    s: byte_array;
+    v: integer;
+}
+
+struct evm_auth_args {
+    accounts.account;
+    accounts.account_auth_descriptor;
+    signatures: list<signature?>;
+}
+
+function get_mount_scope_auth_handler(auth_handlers: map<name, _auth_handler>, op_name: name) {
+    val op_name_components = op_name.split(".");
+    if (op_name_components.size() < 2) return null;
+    
+    for (count in range(op_name_components.size()-1, 0, -1)) {
+        val mount_point = join_text_list(op_name_components, count);
+        if (mount_point in auth_handlers) return auth_handlers[mount_point];
+    }
+
+    return null;
+}
+
+/*
+ * Creates message from operation name and arguments.
+ * It is used when `evm_auth` is used to authenticate a user, 
+ * but auth message is not specified in the auth handler of the operation.
+ */
+function generate_operation_auth_message(blockchain_rid: byte_array, op: gtx_operation) {
+    var message = "Please sign the message to call\noperation:\n- %s".format(op.name);
+
+    if (op.args.size() > 0) {
+        message = message + "\n\n";
+        var arguments = "with arguments:\n";
+        for (arg in op.args) {
+            val argument_value = utils.convert_gtv_to_text(arg);
+
+            arguments = arguments + "- %s\n".format(argument_value);
+        }
+        message = message + arguments.sub(0, arguments.size() - 1);
+    }
+    
+    return message;
+}
+
+function join_text_list(components: list<text>, count: integer) {
+    require(count < components.size() and count > 0, "Error building mount path");
+    var result = components[0];
+    for (i in range(1, count)) {
+        result = result + "." + components[i];
+    }
+    return result;
+}
+
+function require_valid_scope_name(name) =     
+    require(
+        name.matches("^\\w+(\\.\\w+)*$"), 
+        "Invalid scope name <%s>".format(name)
+    );
+
+/*
+ * Checks whether `evm_signatures` operation can be used with provided operation.
+ * We don't keep track of nonce for keys used with evm_signatures, therefore if not used with care,
+ * authorizing an operation with `evm_signatures` could lead to replay attack. In order to use it with
+ * an operation, the operation has to be whitelisted. By default, library only allows 
+ * `evm_signatures` to be used with `ft4.add_auth_descriptor` and `ft4.register_account`.
+ * `evm_signatures` is safe to use in combination with `ft_auth` or `evm_auth` operation.
+ * However if used as only way to authorize an operation, then the operation has to ensure that it
+ * cannot be called more than once with same parameters, e.g. operation creates an entity that has id
+ * that is derived from operation parameters.
+ */
+  
+function is_evm_signatures_authorized_operation(name): boolean {
+    val whitelisted_operations = set([
+        "ft4.register_account",
+        "ft4.add_auth_descriptor",
+        "ft4.update_main_auth_descriptor"
+    ]);
+
+    if (chain_context.args.evm_signatures_authorized_operations??) {
+        whitelisted_operations.add_all(require(
+            try_call(set<text>.from_gtv(chain_context.args.evm_signatures_authorized_operations!!, *)),
+            "Cannot parse 'evm_signatures_authorized_operations' config parameter"
+        ));
+    }
+
+    return name in whitelisted_operations;
+}
+
+function require_evm_signatures_can_be_used() {
+    val all_operations = op_context.get_all_operations();
+
+    require(
+        all_operations.size() > op_context.op_index+1,
+        "Cannot find an operation to authorize with 'ft4.evm_signatures'"
+    );
+    var next_op = all_operations[op_context.op_index+1];
+
+    var op_to_authorize: gtx_operation?;
+    if (not (is_auth_op(next_op) or strategies.is_strategy_op(next_op))) {
+        op_to_authorize = next_op;
+    } else {
+        require(
+            all_operations.size() > op_context.op_index+2,
+            "Cannot find an operation to authorize with 'ft4.evm_signatures'"
+        );
+        op_to_authorize = all_operations[op_context.op_index+2];
+    }
+
+    require(
+        is_evm_signatures_authorized_operation(op_to_authorize.name),
+        "Cannot authorize operation <%s> with evm_signatures".format(op_to_authorize.name)
+    );
+}
+
+function require_regular_next_operation() {
+    val all_operations = op_context.get_all_operations();
+    val this_op = op_context.get_all_operations()[op_context.op_index];
+    
+    require(
+        all_operations.size() > op_context.op_index + 1,
+        "<%s> must be followed by an operation to authorize".format(this_op.name)
+    );
+    
+    val next_op = all_operations[op_context.op_index + 1];
+    val prohibited_operations = ["nop", "timeb", "iccf_proof", "ft4.ft_auth", "ft4.evm_auth", "ft4.evm_signatures"];
+    require(not prohibited_operations.contains(next_op.name), "<%s> cannot authorize <%s>".format(this_op.name, next_op.name));
+}

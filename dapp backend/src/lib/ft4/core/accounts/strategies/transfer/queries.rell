@@ -1,0 +1,131 @@
+
+/**
+ *
+ * @return `null` if all assets are allowed
+ */
+query get_allowed_assets(sender_blockchain_rid: byte_array, sender_id: byte_array, recipient_id: byte_array):
+        list<(asset_id: byte_array, min_amount: big_integer)>? {
+    val rule = find_allowed_assets(sender_blockchain_rid, sender_id, recipient_id);
+    if (rule == null) return null;
+    val allowed_assets = list<(asset_id: byte_array, min_amount: big_integer)>();
+    for ((asset_id, min_amount) in rule) {
+        allowed_assets.add((asset_id = asset_id, min_amount = min_amount));
+    }
+    return allowed_assets;
+}
+
+query get_pending_transfer_strategies(recipient_id: byte_array, filter: pending_transfer_filter? = null): set<text> {
+    val strats = account_creation_transfer @* { recipient_id, .state == account_creation_state.pending };
+
+    var strategies_list = list<set<text>>();
+    val strategies = set<text>();
+
+    if (
+        filter == null or              // no filter object
+        filter.state == null or        // no filter for state
+        filter.state!!.contains_all(  // filter allows both valid and expired
+            pending_transfer_expiration_state.values()
+        )
+    ) {
+        strategies_list = strats @* {} (map<text,rule>.from_gtv(gtv.from_bytes(.rules)).keys());
+    }
+    else {
+        strategies_list = strats @* {
+            filter_account_creation_transfer($, filter.state!!)
+        } (map<text,rule>.from_gtv(gtv.from_bytes(.rules)).keys());
+    }
+
+    for (s in strategies_list) {
+        strategies.add_all(s);
+    }
+    return strategies;
+}
+
+query has_pending_create_account_transfer_for_strategy(
+    strategy_name: text,  
+    sender_blockchain_rid: byte_array,
+    sender_id: byte_array,
+    recipient_id: byte_array,
+    asset_id: byte_array,
+    amount: big_integer
+) {
+    val transfers = account_creation_transfer @* {
+        .recipient_id == recipient_id,
+        .sender_blockchain_rid == sender_blockchain_rid,
+        .sender_id == sender_id,
+        .asset.id == asset_id,
+        .amount == amount,
+        .state == account_creation_state.pending
+    };
+
+    for (transfer in transfers) {
+        val rules = map<text, rule>.from_gtv(gtv.from_bytes(transfer.rules));
+        
+        if (not (strategy_name in rules)) continue;
+        val rule = rules[strategy_name];
+
+        if (
+            is_blockchain_allowed(rule, sender_blockchain_rid) and
+            is_sender_allowed(rule, sender_id) and
+            is_recipient_allowed(rule, recipient_id, sender_id) and
+            is_asset_amount_allowed(rule, transfer.asset, amount)
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+query get_transfer_rules() {
+    val rules = get_config();
+
+    val assets_cache = map<byte_array, map<name, assets.asset>>();
+
+    val mapped_rules = list<rule>();
+
+    for (rule in rules) {
+        val _assets = list<asset_limit>();
+        
+        for (asset in rule.asset_limits) {
+            if (asset.id != null) continue;
+
+            val name = asset.name!!;
+            val brid = asset.issuing_blockchain_rid!!;
+
+            var _asset = assets_cache.get_or_null(brid)?.get_or_null(name);
+            if (empty(_asset)) {
+                _asset = assets.asset @? { .name == name, .issuing_blockchain_rid == brid };
+                if (empty(_asset)) {
+                    continue;
+                }
+                if (not assets_cache.contains(brid)) {
+                    assets_cache[brid] = map<name, assets.asset>();
+                }
+                assets_cache[brid][name] = _asset!!;
+            }
+
+            _assets.add(
+                asset_limit(
+                    id = _asset.id,
+                    name = _asset.name,
+                    issuing_blockchain_rid = _asset.issuing_blockchain_rid,
+                    min_amount = asset.min_amount
+                )
+            );
+        }
+
+        mapped_rules.add(rule(
+            strategies = rule.strategies,
+            timeout_days = rule.timeout_days,
+            blockchains = rule.blockchains,
+            senders = rule.senders,
+            recipients = rule.recipients,
+            require_same_address = rule.require_same_address,
+            allow_all_assets = rule.allow_all_assets,
+            asset_limits = _assets
+        ));
+    }
+
+    return mapped_rules;
+} 

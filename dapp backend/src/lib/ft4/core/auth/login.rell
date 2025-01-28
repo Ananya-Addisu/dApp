@@ -1,0 +1,142 @@
+
+val DEFAULT_LOGIN_CONFIG_NAME = "default";
+
+struct _login_config {
+    flags: list<text>;
+    rules: gtv? = null;
+}
+
+@extendable
+function login_config(): map<name, _login_config>;
+
+function add_login_config(
+    name = DEFAULT_LOGIN_CONFIG_NAME,
+    flags: list<text>,
+    rules: gtv? = null
+) {
+    return [name: _login_config(flags, rules)];
+}
+
+function map_rule(rule: rule_expression): gtv {
+    return [
+        rule.operator.name.to_gtv(),
+        rule.variable.name.to_gtv(),
+        rule.value.to_gtv()
+    ].to_gtv();
+}
+
+function login_simple_rule(rule: rule_expression) = map_rule(rule);
+
+function login_rules(rules_list: list<rule_expression>): gtv {
+    require(rules_list.size() > 0, "Empty login rules list");
+
+    if (rules_list.size() == 1) return map_rule(rules_list[0]);
+    
+    val rules = ["and".to_gtv()];
+    for (rule in rules_list) {
+        rules.add(map_rule(rule));
+    }
+    return rules.to_gtv();
+}
+
+function ttl(millis: integer): gtv {
+    return map_rule(
+        rule_expression(
+            rule_operator.lt,
+            rule_variable.relative_block_time,
+            millis
+        )
+    );
+}
+
+enum rule_variable {
+    block_height,
+    block_time,
+    op_count,
+    relative_block_height,
+    relative_block_time
+}
+
+enum rule_operator {
+    lt,
+    le,
+    eq,
+    ge,
+    gt
+}
+
+struct rule_expression {
+	operator: rule_operator;
+	variable: rule_variable;
+	value: integer;
+}
+
+struct rule_parameters {
+	variable: rule_variable;
+	value: integer;
+}
+
+/*
+ * Operator functions
+ */
+
+function greater_than(rule_parameters) = rule_expression(
+    rule_parameters.variable,
+    rule_operator.gt,
+    rule_parameters.value
+);
+
+function greater_or_equal(rule_parameters) = rule_expression(
+    rule_parameters.variable,
+    rule_operator.ge,
+    rule_parameters.value
+);
+
+function equals(rule_parameters): rule_expression {
+    return rule_expression(
+        rule_parameters.variable,
+        rule_operator.eq,
+        rule_parameters.value
+    );
+}
+
+function less_than(rule_parameters) = rule_expression(
+    rule_parameters.variable,
+    rule_operator.lt,
+    rule_parameters.value
+);
+
+function less_or_equal(rule_parameters) = rule_expression(
+    rule_parameters.variable,
+    rule_operator.le,
+    rule_parameters.value
+);
+
+/*
+ * Rule variable functions
+ */
+
+function block_height(integer) = rule_parameters(
+    rule_variable.block_height,
+    integer
+);
+
+function block_time(integer) = rule_parameters(
+    rule_variable.block_time,
+    integer
+);
+
+function op_count(integer) = rule_parameters(
+    rule_variable.op_count,
+    integer
+);
+
+function relative_block_height(integer) = rule_parameters(
+    rule_variable.relative_block_height,
+    integer
+);
+
+function relative_block_time(integer) = rule_parameters(
+    rule_variable.relative_block_time,
+    integer
+);

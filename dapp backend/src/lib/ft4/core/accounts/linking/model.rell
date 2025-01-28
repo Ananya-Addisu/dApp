@@ -1,0 +1,9 @@
+
+entity account_link {
+    key account, secondary;
+    index secondary, type;
+    
+    accounts.account;
+    secondary: accounts.account;
+    type: text;
+}

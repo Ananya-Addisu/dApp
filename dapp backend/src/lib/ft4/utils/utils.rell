@@ -1,0 +1,155 @@
+val MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/*
+ * For complex validation we might not want to use simple "require()"
+ * but an error message that is returned. 
+ */
+struct validation_result {
+    valid: boolean;
+    error: text? = null;
+}
+
+val VALID = validation_result(true, null);
+
+function invalid(error: text) = validation_result(false, error);
+
+function make_auth_message(message: text) {
+    return "Blockchain:\n{blockchain_rid}\n\n" + message + "\n\nNonce: {nonce}";
+}
+
+function derive_nonce(op: gtx_operation, nonce: integer) {
+    return (
+        chain_context.blockchain_rid, 
+        op.name, 
+        op.args, 
+        nonce
+    ).hash().to_hex().upper_case();
+}
+
+function latest_time() =
+    if (op_context.exists and op_context.block_height > 0)
+        op_context.last_block_time
+    else
+        block @ {} (@max .timestamp) ?: 0;
+
+function validate_blockchain_rid(blockchain_rid: byte_array, descriptor: text = "blockchain_rid") {
+    require(blockchain_rid.size() > 0, "%s cannot be empty".format(descriptor));
+    require(
+        blockchain_rid.size() == 32, 
+        "%s <%s> has invalid length. Expected <32> bytes, found <%d>.".format(descriptor, blockchain_rid, blockchain_rid.size())
+    );
+}
+
+/**
+ * Converts a gtv value to a pretty text representation, with newlines and indentations.
+ *
+ * @param gtv                   the gtv value to convert.
+ *
+ * @param indentation_index     how many collections deep we are. Used for recursive
+ *                              iteration on collections
+ *
+ * @param in_dict               if inside a dictionary, it will not add indent output
+ *                              except collections. This prevents dicts having `\t`
+ *                              between key and value.
+ */
+function convert_gtv_to_text(
+    gtv,
+    indentation_index: integer = 0,
+    in_dict: boolean = false
+): text {
+    var indents = "\t".repeat(indentation_index);
+    var string: text = if (in_dict) "" else indents;
+    /*
+     * supported types
+     * - text
+     * - byte_array
+     * - dictionary
+     * - list
+     * - integer
+     * - decimal
+     * - big_integer
+     * - boolean
+     */
+    if (is_text(gtv)){
+        string += text.from_gtv(gtv);
+    }
+    else if (is_byte_array(gtv)){
+        string += byte_array.from_gtv(gtv).to_hex().upper_case();
+    }
+    else if (is_dict(gtv)) {
+        val dict = map<text, gtv>.from_gtv(gtv);
+        if (dict.size() == 0) {
+            string += "{ }";
+        } else {
+            string += "{\n";
+            for (elm in dict) {
+                string += indents + "\t" +
+                    elm[0] + ": " +
+                    convert_gtv_to_text(elm[1], indentation_index + 1, true) + ",\n";
+            }
+            string = 
+                // remove trailing comma and newline
+                string.sub(0, string.size()-2) +
+                //add newline back
+                "\n" +
+                // add indents or, if base level, add two spaces to match the 
+                // `- `(dash+space) at the start of the line
+                (if (indentation_index != 0) indents else "  ") + 
+                //close the dict
+                "}";
+        }
+    }
+    else if (is_list(gtv)) {
+        val l = list<gtv>.from_gtv(gtv);
+        if (l.size() == 0) {
+            string += "[ ]";
+        } else {
+            string += "[\n";
+            for (elm in l) {
+                string += convert_gtv_to_text(elm, indentation_index + 1) + ",\n";
+            }
+            string =
+                // remove trailing comma and newline
+                string.sub(0, string.size()-2) +
+                //add newline back
+                "\n" +
+                // add indents or, if base level, add two spaces to match the
+                // `- `(dash+space) at the start of the line
+                (if (indentation_index != 0) indents else "  ") + 
+                //close the list
+                "]";
+        }
+    }
+    // integer, decimal, big_integer, boolean
+    else {
+        string += gtv;
+    }
+    return string;
+}
+
+/*
+ * Following list of functions are used to check type of object wrapped inside gtv (gtv is Chromia's ASN.1 based encoding).
+ * See below for how encoding is defined for different types:
+ * https://bitbucket.org/chromawallet/postchain-client/src/430bc34bf945905e4883af317f16bbb277102175/src/gtv/definition.ts#lines-8
+ * Depending on wrapped value type, first byte of serialized gtv will have one of following values:
+ * - byte_array  -> x"a1" (161)
+ * - text        -> x"a2" (162)
+ * - integer     -> x"a3" (163)
+ * - dict (map)  -> x"a4" (164)
+ * - list        -> x"a5" (165)
+ * - big_integer -> x"a6" (166)
+ *
+ * In the future these functions will be replaced with native Rell functions.
+ */ 
+
+function is_byte_array(gtv) = gtv.to_bytes()[0] == 161;
+
+function is_text(gtv) = gtv.to_bytes()[0] == 162;
+
+function is_integer(gtv) = gtv.to_bytes()[0] == 163;
+
+function is_dict(gtv) = gtv.to_bytes()[0] == 164;
+
+function is_list(gtv) = gtv.to_bytes()[0] == 165;
+
+function is_big_integer(gtv) = gtv.to_bytes()[0] == 166;

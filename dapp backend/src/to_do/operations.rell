@@ -1,0 +1,51 @@
+operation create_task(
+    user_id: byte_array,
+    task_id: byte_array,
+    task_title: text,
+    task_description: text,
+    due_date: timestamp
+) {
+    require(task_title.size() > 0, "Task title cannot be empty");
+    
+    val account = auth.authenticate();
+    create task (
+        user @ { user_id },
+        .task_id = task_id,
+        .task_title = task_title,
+        .task_description = task_description,
+        .due_date = due_date
+    );
+}
+
+operation update_task(
+    task_id: byte_array,
+    task_title: text,
+    task_description: text,
+    due_date: timestamp
+) {
+    require(task_title.size() > 0, "Task title cannot be empty");
+    
+    val account = auth.authenticate();
+    update task @ {
+        task_id
+    } (
+        .task_title = task_title,
+        .task_description = task_description,
+        .due_date = due_date,
+        .updated_at = op_context.last_block_time
+    );
+}
+
+operation delete_task(task_id: byte_array) {
+    val account = auth.authenticate();
+    delete task @? { task_id };
+}
+
+operation complete_task(task_id: byte_array) {
+    val account = auth.authenticate();
+    update task @ { task_id } (
+        .is_completed = true,
+        .updated_at
+    );
+}
+

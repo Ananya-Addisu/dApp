@@ -1,0 +1,6 @@
+@mount("ft4.admin")
+module;
+
+import ^^.core.admin;
+import ^^.assets;
+import ^^.accounts;

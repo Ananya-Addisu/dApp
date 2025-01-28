@@ -1,0 +1,12 @@
+
+@extendable function before_transfer(from: accounts.account, to: accounts.account, asset, amount: big_integer);
+
+@extendable function after_transfer(from: accounts.account, to: accounts.account, asset, amount: big_integer);
+
+@extendable function before_mint(accounts.account, asset, amount: big_integer);
+
+@extendable function after_mint(accounts.account, asset, amount: big_integer);
+
+@extendable function before_burn(accounts.account, asset, amount: big_integer);
+
+@extendable function after_burn(accounts.account, asset, amount: big_integer);

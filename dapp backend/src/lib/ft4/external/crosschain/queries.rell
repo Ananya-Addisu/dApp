@@ -1,0 +1,40 @@
+
+query get_asset_origin_by_id(asset_id: byte_array) {
+    return crosschain.asset_origin @? { .asset.id == asset_id } .origin_blockchain_rid;
+}
+
+query get_pending_transfers_for_account(
+    account_id: byte_array,
+    page_size: integer?,
+    page_cursor: text?
+) {
+    return utils.make_page(
+        crosschain.get_paginated_pending_transfers(account_id, page_size, page_cursor),
+        page_size
+    );
+}
+
+query get_last_pending_transfer_for_account(
+    sender_id: byte_array, 
+    target_blockchain_rid: byte_array, 
+    recipient_id: byte_array,
+    asset_id: byte_array, 
+    amount: big_integer
+) = crosschain.get_last_pending_transfer_for_account(
+    sender_id,
+    target_blockchain_rid,
+    recipient_id,
+    asset_id,
+    amount
+);
+
+query is_transfer_applied(init_tx_rid: byte_array, init_op_index: integer) {
+    val transfer = crosschain.applied_transfers @? { .init_tx_rid == init_tx_rid, .init_op_index == init_op_index };
+    return transfer != null;
+}
+
+query get_apply_transfer_tx(init_tx_rid: byte_array, init_op_index: integer) =
+    crosschain.applied_transfers @ { .init_tx_rid == init_tx_rid, .init_op_index == init_op_index } (
+        tx = gtx_transaction.from_bytes($.transaction.tx_data).to_gtv(),
+        op_index = $.op_index
+    );
