@@ -38,7 +38,7 @@ A decentralized application (dApp) for managing tasks on the Chromia blockchain,
 1. Clone the repository:  
    ```bash  
    git clone https://github.com/Ananya-Addisu/dapp.git  
-   cd dapp backend  
+   cd dapp/ daap backend  
    ```  
 2. Install dependencies:  
    ```bash  
