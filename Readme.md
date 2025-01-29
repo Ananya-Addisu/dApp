@@ -2,7 +2,7 @@
 
 ![Chromia](https://img.shields.io/badge/Blockchain-Chromia-blue) ![Next.js](https://img.shields.io/badge/Framework-Next.js-000000) ![License](https://img.shields.io/badge/License-MIT-green)  
 
-A blockchain-powered task management system ensuring **immutability**, **security**, and **transparency** via Chromia Made by [Ananya Addisu](https://sidraq.t.me/)
+A blockchain-powered task management system ensuring **immutability**, **security**, and **transparency** via Chromia Made by [Ananya Addisu Workineh](https://sidraq.t.me/)
 
 ---
 
