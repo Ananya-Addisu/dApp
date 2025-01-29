@@ -108,27 +108,195 @@ sequenceDiagram
 ```
 ---
 ## **Project Structure**  
-### **Backend Layout**  
+### **Frontend/Backend Layout**  
 
 ```bash  
-dapp-backend/  
-├── docker-compose.yml        # PostgreSQL container configuration  
-├── package.json              # Node.js dependencies and scripts  
-├── chromia.yml               # Chromia blockchain network settings  
-├── src/  
-│   ├── development.rell      # Development environment setup  
-│   ├── main.rell             # Primary module imports and initialization  
-│   ├── registration/         # EVM-compatible user registration system  
-│   │   ├── module.rell       # User account creation logic  
-│   │   └── test/            # Registration test suite  
-│   ├── test/                # End-to-end test framework  
-│   └── to_do/               # Core task management logic  
-│       ├── auth.rell         # FT4 session authentication handlers  
-│       ├── dto.rell          # Data transfer object schemas  
-│       ├── model.rell        # Database entity definitions  
-│       ├── module.rell       # Dependency injection and module linking  
-│       ├── operations.rell   # CRUD operations for tasks  
-│       └── queries.rell      # Task query system with filters  
+└── ananya-addisu-dapp/
+    ├── Readme.md
+    ├── dapp backend/
+    │   ├── chromia.yml
+    │   ├── docker-compose.yml
+    │   ├── package-lock.json
+    │   ├── package.json
+    │   ├── build/
+    │   │   └── to_do_project.xml
+    │   └── src/
+    │       ├── development.rell
+    │       ├── main.rell
+    │       ├── lib/
+    │       │   └── ft4/
+    │       │       ├── module.rell
+    │       │       ├── version.rell
+    │       │       ├── accounts/
+    │       │       │   ├── module.rell
+    │       │       │   ├── linking/
+    │       │       │   │   └── module.rell
+    │       │       │   └── strategies/
+    │       │       │       ├── module.rell
+    │       │       │       ├── open/
+    │       │       │       │   └── module.rell
+    │       │       │       └── transfer/
+    │       │       │           ├── module.rell
+    │       │       │           ├── fee/
+    │       │       │           │   └── module.rell
+    │       │       │           ├── open/
+    │       │       │           │   └── module.rell
+    │       │       │           └── subscription/
+    │       │       │               └── module.rell
+    │       │       ├── admin/
+    │       │       │   ├── module.rell
+    │       │       │   └── crosschain/
+    │       │       │       └── module.rell
+    │       │       ├── assets/
+    │       │       │   ├── module.rell
+    │       │       │   └── locking/
+    │       │       │       └── module.rell
+    │       │       ├── auth/
+    │       │       │   └── module.rell
+    │       │       ├── core/
+    │       │       │   ├── accounts/
+    │       │       │   │   ├── auth_basic.rell
+    │       │       │   │   ├── auth_descriptor_rule_expression.rell
+    │       │       │   │   ├── auth_descriptor_rule_validation.rell
+    │       │       │   │   ├── auth_external.rell
+    │       │       │   │   ├── auth_flags_config.rell
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── rate_limit.rell
+    │       │       │   │   ├── linking/
+    │       │       │   │   │   ├── model.rell
+    │       │       │   │   │   └── module.rell
+    │       │       │   │   └── strategies/
+    │       │       │   │       ├── auth_message.rell
+    │       │       │   │       ├── module.rell
+    │       │       │   │       ├── open/
+    │       │       │   │       │   └── module.rell
+    │       │       │   │       └── transfer/
+    │       │       │   │           ├── config.rell
+    │       │       │   │           ├── config_utils.rell
+    │       │       │   │           ├── fee_config.rell
+    │       │       │   │           ├── module.rell
+    │       │       │   │           ├── queries.rell
+    │       │       │   │           ├── fee/
+    │       │       │   │           │   ├── config.rell
+    │       │       │   │           │   ├── module.rell
+    │       │       │   │           │   └── queries.rell
+    │       │       │   │           ├── open/
+    │       │       │   │           │   └── module.rell
+    │       │       │   │           └── subscription/
+    │       │       │   │               ├── config.rell
+    │       │       │   │               ├── module.rell
+    │       │       │   │               └── queries.rell
+    │       │       │   ├── admin/
+    │       │       │   │   └── module.rell
+    │       │       │   ├── assets/
+    │       │       │   │   ├── asset.rell
+    │       │       │   │   ├── extensions.rell
+    │       │       │   │   ├── history.rell
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── transfer.rell
+    │       │       │   │   └── locking/
+    │       │       │   │       ├── functions.rell
+    │       │       │   │       └── module.rell
+    │       │       │   ├── auth/
+    │       │       │   │   ├── authentication.rell
+    │       │       │   │   ├── login.rell
+    │       │       │   │   └── module.rell
+    │       │       │   ├── crosschain/
+    │       │       │   │   ├── blockchain.rell
+    │       │       │   │   ├── extensions.rell
+    │       │       │   │   ├── module.rell
+    │       │       │   │   └── transfer.rell
+    │       │       │   └── prioritization/
+    │       │       │       ├── module.rell
+    │       │       │       └── default/
+    │       │       │           └── module.rell
+    │       │       ├── crosschain/
+    │       │       │   └── module.rell
+    │       │       ├── external/
+    │       │       │   ├── accounts/
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── operations.rell
+    │       │       │   │   ├── queries.rell
+    │       │       │   │   └── strategies/
+    │       │       │   │       ├── module.rell
+    │       │       │   │       ├── operations.rell
+    │       │       │   │       └── queries.rell
+    │       │       │   ├── admin/
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── operations.rell
+    │       │       │   │   └── crosschain/
+    │       │       │   │       └── module.rell
+    │       │       │   ├── assets/
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── operations.rell
+    │       │       │   │   ├── queries.rell
+    │       │       │   │   └── locking/
+    │       │       │   │       ├── module.rell
+    │       │       │   │       └── queries.rell
+    │       │       │   ├── auth/
+    │       │       │   │   ├── module.rell
+    │       │       │   │   ├── operations.rell
+    │       │       │   │   └── queries.rell
+    │       │       │   └── crosschain/
+    │       │       │       ├── module.rell
+    │       │       │       ├── operations.rell
+    │       │       │       └── queries.rell
+    │       │       ├── prioritization/
+    │       │       │   ├── module.rell
+    │       │       │   └── default/
+    │       │       │       └── module.rell
+    │       │       ├── test/
+    │       │       │   └── utils.rell
+    │       │       └── utils/
+    │       │           ├── pagination.rell
+    │       │           └── utils.rell
+    │       ├── registration/
+    │       │   ├── module.rell
+    │       │   └── test/
+    │       │       └── regestration_test.rell
+    │       ├── test/
+    │       │   ├── test_operations.rell
+    │       │   └── to_do_project_test.rell
+    │       └── to_do/
+    │           ├── auth.rell
+    │           ├── dto.rell
+    │           ├── model.rell
+    │           ├── module.rell
+    │           ├── operations.rell
+    │           └── queries.rell
+    └── frontend/
+        ├── README.md
+        ├── eslint.config.mjs
+        ├── next-env.d.ts
+        ├── next.config.ts
+        ├── package-lock.json
+        ├── package.json
+        ├── postcss.config.mjs
+        ├── tailwind.config.ts
+        ├── tsconfig.json
+        ├── public/
+        │   └── todo.PNG
+        └── src/
+            ├── app/
+            │   ├── globals.css
+            │   ├── layout.tsx
+            │   ├── page.tsx
+            │   ├── components/
+            │   │   └── NavBar.tsx
+            │   ├── create/
+            │   │   └── page.tsx
+            │   ├── list/
+            │   │   └── page.tsx
+            │   └── register/
+            │       └── page.tsx
+            ├── components/
+            │   ├── AddTodo.tsx
+            │   └── TodoItem.tsx
+            ├── hooks/
+            │   └── useTodos.ts
+            └── types/
+                └── todo.ts
+  
 ```  
 
 ### **File Responsibility Matrix**  
