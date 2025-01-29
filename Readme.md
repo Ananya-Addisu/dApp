@@ -8,7 +8,7 @@ A blockchain-powered task management system ensuring **immutability**, **securit
 
 ## **Overview**  
 ### **Purpose**  
-A decentralized application (dApp) for managing tasks on the Chromia blockchain, designed to:  
+I is a decentralized application (dApp) for managing tasks on the Chromia blockchain, designed to:  
 - Ensure **data integrity** through immutable ledger storage.  
 - Provide **end-to-end security** via cryptographic authentication.  
 - Enable **cross-chain interoperability** for future extensibility.  
